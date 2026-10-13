@@ -80,7 +80,7 @@ Why nobody can cheat:
 
 - **No way back.** Redeeming KBT on Kaspa for the ERC-20 on Ethereum needs Ethereum to verify a
   proof of Kaspa's consensus (PoW and GHOSTDAG) that a burn happened. Nobody has built such a proof
-  yet; the open questions are written up in [`docs/KASPA-OUTBOUND-STUDY.md`](docs/KASPA-OUTBOUND-STUDY.md).
+  yet; the research has started.
   The current vault cannot release anything, by design, and never will.
 - **Test token only.** The vault accepts KBT, a test ERC-20 with no value. A capped USDC instance
   is planned after the redemption design is settled.
@@ -355,8 +355,7 @@ again.
 | [`bin/`](bin) | `bridge-prover.mjs` (the prover service), `bridge.mjs` (deploy, advance, transfer), helpers |
 | [`deployments/`](deployments) | the mainnet instances: covenant ids, parameters, every transaction |
 | `eth-prover/out-*/` | proof bundles of every mainnet advance, with the inputs to re-prove them |
-| [`docs/`](docs) | research on the way back: what Ethereum would need to verify about Kaspa ([`KASPA-OUTBOUND-STUDY.md`](docs/KASPA-OUTBOUND-STUDY.md)) |
-| `src/`, `test/`, `fixtures/`, `prover/`, `vendor/` | the Kaspa ZK precompile tests this project grew out of, a toy RISC Zero program, the Kaspa WASM SDK 2.1.0 |
+| `src/`, `test/`, `fixtures/`, `prover/`, `vendor/`, [`docs/`](docs) | the Kaspa ZK precompile tests this project grew out of (write-up in `docs/`), a toy RISC Zero program, the Kaspa WASM SDK 2.1.0 |
 
 ## Roadmap
 
