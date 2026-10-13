@@ -207,9 +207,11 @@ the v1 sighash, so the driver walks them up without re-signing.
 
 ### The prover service (CP-7)
 
-Needs, in the repo root: `eth-rpc-url.txt` (execution RPC with `eth_getProof`), `runpod-api-key.txt`
-(Runpod key, chmod 600; the prepaid balance is the spend cap), `~/.ssh/id_ed25519`, Docker (for the
-wrap), the node-box build of `eth-prover`, a Kaspa node's wRPC (Borsh) port.
+Needs, in the repo root: `eth-rpc-url.txt` (execution RPC with `eth_getProof`), Docker (for the
+wrap), the node-box build of `eth-prover`, a Kaspa node's wRPC (Borsh) port, and a GPU mode:
+`--gpu runpod` (default; `runpod-api-key.txt`, chmod 600, the prepaid balance is the spend cap,
+plus `~/.ssh/id_ed25519`) or `--gpu local` (this machine's NVIDIA GPU through
+`docker run --gpus all`, no Runpod key). Step-by-step setup for both is in the top-level README.
 
 ```
 pm2 start "node bin/bridge-prover.mjs --url ws://127.0.0.1:17110" --name bridge-prover --kill-timeout 20000

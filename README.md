@@ -157,19 +157,89 @@ when the proof is done: a few cents per proof (`bin/bridge-prover.mjs`).
 
 ## Run a prover
 
-Anyone can run one; it holds no keys and cannot mint anything a valid proof does not carry.
-Requirements: an x86_64 Linux box with Docker and Node 20, a Kaspa node's wRPC (Borsh) endpoint,
-an Ethereum execution RPC that serves `eth_getProof` (a free tier works), and a GPU (yours, or a
-Runpod API key with a small prepaid balance). No Ethereum node.
+Anyone can run one; it holds no keys and cannot mint anything a valid proof does not carry. Every
+60 seconds it reads Ethereum's latest finalized header and the vault's deposit counter. When a new
+deposit is final, it proves and submits; when nothing happens for a week, it submits a heartbeat so
+the covenant keeps up with Ethereum's validator rotations.
+
+### What every prover needs
+
+- An x86_64 Linux machine with Docker and Node 20. It wraps proofs to Groth16 on the CPU (71 s,
+  RISC Zero's `risczero/risc0-groth16-prover` image, pulled automatically).
+- This repository, with `eth-prover` and `bridge` built (`cargo build --release` in each; Rust
+  stable, plus `rzup install rust 1.94.1` and `rzup install r0vm 3.0.4` from
+  [risczero.com/install](https://risczero.com/install)). These host builds fetch data, decode
+  journals and build Kaspa transactions; the proof itself always comes from the Docker image.
+- A Kaspa node (rusty-kaspa 2.1.0 or later, Toccata active) with its wRPC Borsh port open to the
+  prover and `--utxoindex`.
+- An Ethereum execution RPC that serves `eth_getProof`. A free Alchemy or Infura key works. Put the
+  full URL in `eth-rpc-url.txt` in the repository root (`chmod 600`; it is git-ignored and the
+  service redacts it from its logs). No Ethereum node: beacon data comes from public light-client
+  endpoints and is verified by signature.
+- The bridge state file, `bridge-cp6-state.json`, in the repository root. For the live mainnet
+  instance, copy [`deployments/kaspa-mainnet-bridge-ac21e831.json`](deployments) and make sure it
+  matches the covenant's current state on chain (two provers advancing one covenant from stale
+  state files will see each other's transactions as "input not found").
+- A GPU, in one of the two modes below.
+
+### Mode 1: your own NVIDIA GPU (`--gpu local`)
+
+Needs the NVIDIA driver and the [NVIDIA Container
+Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html),
+so that this works:
 
 ```
-pm2 start "node bin/bridge-prover.mjs --url ws://127.0.0.1:17110" --name bridge-prover
+docker run --rm --gpus all kasperolabs/eth-prover:cuda nvidia-smi
 ```
 
-Every 60 seconds it reads Ethereum's latest finalized header and the vault's deposit counter. When
-a new deposit is final, it proves and submits; when nothing happens for a week, it submits a
-heartbeat so the covenant keeps up with Ethereum's validator rotations. Details, log events and
-costs: [`bridge/README.md`](bridge/README.md#the-prover-service-cp-7).
+Supported cards: RTX 30xx, RTX 40xx, A100, L40S, L4, H100 and similar (sm_80 and newer), 24 GB of
+VRAM recommended. Then:
+
+```
+pm2 start "node bin/bridge-prover.mjs --url ws://127.0.0.1:17110 --gpu local" --name bridge-prover
+```
+
+Cost: electricity. A plain proof is about 2 minutes on an RTX 4090; a weekly heartbeat about 11.
+This mode runs the same image and command as the pods, but has not yet driven a mainnet advance
+itself; every mainnet proof so far came from Mode 2.
+
+### Mode 2: rented GPU per proof (`--gpu runpod`, the default)
+
+For a machine without a GPU. The service creates a GPU pod on [Runpod](https://www.runpod.io)
+through its REST API, proves, copies the result back over SSH and deletes the pod, every time.
+One-time setup:
+
+1. Create a Runpod account and add a **small prepaid balance** ($10 is months of proofs). Leave
+   automatic top-up off: the balance is your hard spending cap.
+2. In the console, open **Settings, API Keys** ([console.runpod.io/user/credentials](https://console.runpod.io/user/credentials)),
+   click **Create API Key**, permission **All**, and copy the key (it is shown once).
+3. On the prover machine, save it without leaving it in your shell history:
+   ```
+   read -rs RP && printf '%s' "$RP" > runpod-api-key.txt && chmod 600 runpod-api-key.txt && unset RP
+   curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $(cat runpod-api-key.txt)" https://rest.runpod.io/v1/pods   # 200
+   ```
+4. Make sure the machine has an SSH key (`ls ~/.ssh/id_ed25519.pub || ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519`).
+   The service hands its public half to each pod at creation; nothing to configure in Runpod.
+
+Then:
+
+```
+pm2 start "node bin/bridge-prover.mjs --url ws://127.0.0.1:17110" --name bridge-prover --kill-timeout 20000
+```
+
+Measured on mainnet: pod ready in 1 to 5 minutes (image pull), proof in about 2, pod deleted
+right after; $0.05 to $0.11 per proof, about $0.25 for a weekly heartbeat. Pods are named
+`bridge-prover-*`; any such pod still alive between proofs is deleted on the next tick.
+
+### Try it without spending anything
+
+```
+node bin/bridge-prover.mjs --once --dry-run --force heartbeat
+```
+
+Fetches the light-client data from the covenant's current header, runs the program in dev mode,
+checks the journal continues from the covenant's state, and prints the cycle count. No GPU, no
+transaction. Log events and costs: [`bridge/README.md`](bridge/README.md#the-prover-service-cp-7).
 
 ## Numbers
 

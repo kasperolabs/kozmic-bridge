@@ -6,6 +6,9 @@
 //   node bin/bridge-prover.mjs --url ws://... --once --force heartbeat  # prove + advance now even if nothing is due
 //   node bin/bridge-prover.mjs --url ws://... --once --dry-run          # fetch + dev-mode execute only, no pod, no tx
 //
+// GPU:     --gpu runpod (default): rent one Runpod pod per proof through the REST API, delete it after.
+//          --gpu local: prove on this machine's NVIDIA GPU in the Docker image (needs the NVIDIA driver and
+//          nvidia-container-toolkit, so that `docker run --gpus all` works); no Runpod key needed.
 // Options: --state bridge-cp6-state.json  --heartbeat-days 7  --poll 60  --pod-cap 3600  --min-bridge-kas 6
 //          --beacons URL,URL  --eth-rpc eth-rpc-url.txt  --runpod-key runpod-api-key.txt  --ssh-key ~/.ssh/id_ed25519
 //          --no-submit (stop after wrap; print the advance command)
@@ -39,7 +42,10 @@ const HB_MS = Number(args['heartbeat-days'] ?? 7) * 86_400_000;
 const POLL_MS = Number(args.poll ?? 60) * 1000;
 const POD_CAP_S = Number(args['pod-cap'] ?? 3600);
 const MIN_KAS = Number(args['min-bridge-kas'] ?? 6);
-const IMAGE = 'kasperolabs/eth-prover:cuda';
+const GPU = String(args.gpu ?? 'runpod');
+if (!['runpod', 'local'].includes(GPU)) die('--gpu runpod | local');
+const IMAGE = args.image ?? 'kasperolabs/eth-prover:cuda';
+const USE_RUNPOD = GPU === 'runpod' && !args['dry-run'];
 const GPUS = ['NVIDIA GeForce RTX 4090', 'NVIDIA L40S', 'NVIDIA RTX 6000 Ada Generation', 'NVIDIA A40', 'NVIDIA GeForce RTX 3090'];
 const MAX_DEPOSITS = 4;
 if (!args.url && !args['dry-run']) die('--url ws://<node>:17110 is required');
@@ -51,8 +57,9 @@ let backoffUntil = 0, backoffMs = 0, lastIdleLog = 0;
 // ---------------------------------------------------------------- main
 acquireLock();
 process.on('exit', () => { try { unlinkSync(LOCK); } catch { /* gone */ } });
-for (const s of ['SIGINT', 'SIGTERM']) process.on(s, async () => { await deleteOurPods('signal'); process.exit(130); });
-event('start', { beacons: BEACONS.map(host), heartbeatDays: HB_MS / 86_400_000, poll: POLL_MS / 1000, dryRun: !!args['dry-run'] });
+for (const s of ['SIGINT', 'SIGTERM']) process.on(s, async () => { if (USE_RUNPOD) await deleteOurPods('signal'); process.exit(130); });
+if (USE_RUNPOD) readSecret(args['runpod-key'] ?? 'runpod-api-key.txt', 'Runpod API key; or run with --gpu local');
+event('start', { gpu: GPU, image: IMAGE, beacons: BEACONS.map(host), heartbeatDays: HB_MS / 86_400_000, poll: POLL_MS / 1000, dryRun: !!args['dry-run'] });
 for (;;) {
   try { await tick(); } catch (e) { event('tick-error', { error: redact(e.message ?? e) }); }
   if (args.once) break;
@@ -61,7 +68,7 @@ for (;;) {
 
 // ---------------------------------------------------------------- tick
 async function tick() {
-  if (!args['dry-run']) await deleteOurPods('orphan-sweep');
+  if (USE_RUNPOD) await deleteOurPods('orphan-sweep');
   const st = JSON.parse(readFileSync(STATE, 'utf8'));
   const cursor = Number(st.state.cursor);
   const fin = await finality();
@@ -135,9 +142,14 @@ async function cycle(st, nonces, kind, view) {
   event('preflight-ok', { rotations: rec.rotations, userCycles: rec.userCycles, segments: rec.segments, newHeader: rec.newHeader });
   if (args['dry-run']) { event('dry-run-done', rec); return; }
 
-  // 3. GPU pod
-  const pod = await provePod(join(dir, 'inputs.cbor'), dir, `bridge-prover-${stamp}`);
-  Object.assign(rec, { pod: { gpu: pod.gpu, dc: pod.dc, costPerHr: pod.costPerHr, costUsd: pod.costUsd }, t: { ...rec.t, ...pod.t } });
+  // 3. STARK on a GPU: a rented pod, or this machine's GPU
+  if (GPU === 'local') {
+    const g = proveLocal(dir);
+    Object.assign(rec, { local: { gpu: g.gpu }, t: { ...rec.t, prove: g.seconds } });
+  } else {
+    const pod = await provePod(join(dir, 'inputs.cbor'), dir, `bridge-prover-${stamp}`);
+    Object.assign(rec, { pod: { gpu: pod.gpu, dc: pod.dc, costPerHr: pod.costPerHr, costUsd: pod.costUsd }, t: { ...rec.t, ...pod.t } });
+  }
   const imageId = readFileSync(join(dir, 'image_id.hex'), 'utf8').trim();
   if (imageId !== st.params.imageId) throw new Error(`pod proved image ${imageId}, the covenant pins ${st.params.imageId}`);
   if (!existsSync(join(dir, 'receipt.succinct.bin'))) throw new Error('pod returned no receipt.succinct.bin');
@@ -160,6 +172,20 @@ async function cycle(st, nonces, kind, view) {
   const after = JSON.parse(readFileSync(STATE, 'utf8'));
   const h = after.history[after.history.length - 1];
   event('advanced', { ...rec, txid: h.txid, budgets: h.budgets, fee: h.fee, mints: h.mints, cursor: h.cursor, bridgeKas: Number(after.utxo.amount) / 1e8 });
+}
+
+// ---------------------------------------------------------------- local GPU
+// The same image the pods run, on this machine's GPU. The cycle directory is mounted at /work, so the
+// bundle files land next to inputs.cbor exactly as the pod download would put them.
+function proveLocal(dir) {
+  const smi = run('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader'], { timeout: 20_000 });
+  if (smi.code !== 0) throw new Error('--gpu local: nvidia-smi failed; is the NVIDIA driver installed?');
+  const t0 = Date.now();
+  const r = run('docker', ['run', '--rm', '--gpus', 'all', '-v', `${dir}:/work`, IMAGE,
+    'eth-prover', 'prove', '--inputs', '/work/inputs.cbor', '--no-wrap', '--out', '/work'], { timeout: POD_CAP_S * 1000 });
+  writeFileSync(join(dir, 'prove.log'), r.out);
+  if (r.code !== 0) throw new Error(`local prove failed (exit ${r.code}): ${tail(r.out, 3)}`);
+  return { gpu: smi.out.trim().split('\n')[0], seconds: secs(t0) };
 }
 
 // ---------------------------------------------------------------- Runpod
