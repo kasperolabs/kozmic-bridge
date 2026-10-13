@@ -1,17 +1,20 @@
-# eth-prover GPU image: STARK proving (and, where it works, the Groth16 wrap) on the GPU.
+# eth-prover GPU image: STARK proving on the GPU; the Groth16 wrap runs on a CPU box (see README).
 #
 # Build (x86_64 box with Docker, no GPU needed; BuildKit cache mounts make rebuilds after a source change
 # take minutes instead of the ~30 min first build):
 #   docker build -f docker/Dockerfile.cuda -t kasperolabs/eth-prover:cuda .
-# Run on a rented GPU pod: the container starts sshd if $PUBLIC_KEY is set (RunPod convention) and idles.
 #
-# Measured 2026-10-12 on an RTX 4090: STARK + recursion for the minimal-spec fixture in 57 s (CPU, 12 cores: 1 h 56 min).
-# Known issue: the CUDA Groth16 wrap (risc0-groth16-sys / sppark) dies with "an illegal memory access" on that
-# box. Workflow that works: `prove --no-wrap` on the GPU (saves receipt.succinct.bin), then `wrap` on a box with
-# Docker (risczero/risc0-groth16-prover image, ~2 min on CPU).
+# Reproduce the image ids WITHOUT a GPU (writes IMAGE_IDS.txt into the current directory):
+#   docker build -f docker/Dockerfile.cuda --target ids --output type=local,dest=. .
+#   cat IMAGE_IDS.txt     # mainnet program must print 4756d736d00cc0e5b813fd9bbb8fe586dbfe9cee524e61e79335cc2585413a50
+# The ids stage reuses the build stage below unchanged, so the program it hashes is the same artifact the
+# GPU image carries; only the host binary is rebuilt without CUDA so it can run on a machine with no driver.
 #
-# Kernels are built for sm_89 (RTX 4090, 4080, L4, RTX 6000 Ada) plus PTX, which JITs on newer cards (H100).
-# A 3090 (sm_86) needs "-gencode arch=compute_86,code=sm_86" added to NVCC_APPEND_FLAGS.
+# Run on a rented GPU pod: the container starts sshd if $PUBLIC_KEY is set (Runpod convention) and idles.
+# Known issue: the CUDA Groth16 wrap (risc0-groth16-sys / sppark) dies with "an illegal memory access" on
+# the tested boxes, so the working flow is `prove --no-wrap` on the GPU, then `wrap` on a box with Docker.
+#
+# Kernels are built for sm_80, sm_86, sm_89, sm_90 plus PTX for newer cards.
 
 # ---------- build stage ----------
 FROM nvidia/cuda:12.6.3-devel-ubuntu22.04 AS build
@@ -26,8 +29,6 @@ ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/ca
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
 
 # RISC Zero: guest Rust toolchain (>= 1.90 for this dependency tree), r0vm 3.0.4, native Groth16 parameters.
-# rzup installs under /root/.risc0, which is copied into the runtime image (the prover looks the
-# groth16 component up through rzup).
 RUN curl -L https://risczero.com/install | bash \
     && /root/.risc0/bin/rzup install rust 1.94.1 \
     && /root/.risc0/bin/rzup install r0vm 3.0.4 \
@@ -47,7 +48,18 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo build --release --features cuda -p eth-bridge-host \
     && cp target/release/eth-prover /eth-prover
 
-# ---------- runtime stage ----------
+# ---------- ids: the image ids, printable without a GPU ----------
+FROM build AS ids-run
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/src/target \
+    cargo build --release -p eth-bridge-host \
+    && ./target/release/eth-prover ids | tee /IMAGE_IDS.txt
+
+FROM scratch AS ids
+COPY --from=ids-run /IMAGE_IDS.txt /IMAGE_IDS.txt
+
+# ---------- runtime stage (the GPU image; the default target) ----------
 FROM nvidia/cuda:12.6.3-runtime-ubuntu22.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates libssl3 git curl openssh-server \
@@ -59,3 +71,4 @@ COPY docker/pod-start.sh /usr/local/bin/pod-start.sh
 RUN chmod +x /usr/local/bin/pod-start.sh
 WORKDIR /work
 CMD ["/usr/local/bin/pod-start.sh"]
+

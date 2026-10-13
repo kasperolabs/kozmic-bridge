@@ -162,8 +162,18 @@ cd eth-prover && cargo build --release
 the one check no explorer can do for you: build the image, print the id, compare it with
 `4756d736…` and with `image_id.hex` in any bundle under `eth-prover/out-*/`.
 
-> *Pending before release:* a GPU-free build target that prints the image id. The CUDA image cannot
-> run `eth-prover ids` on a machine without an NVIDIA driver.
+Without a GPU, from a clean checkout (x86_64, Docker, about 40 minutes from an empty cache):
+
+```
+cd eth-prover
+docker build -f docker/Dockerfile.cuda --target ids --output type=local,dest=. .
+cat IMAGE_IDS.txt   # eth-bridge-guest (mainnet spec) image id: 4756d736d00cc0e5b813fd9bbb8fe586dbfe9cee524e61e79335cc2585413a50
+```
+
+Verified 2026-10-13 with a fresh BuildKit builder and no cache. The minimal-spec id printed next to it
+differs from the one in the test bundles (`d7c73376…`): those bundles were proven before the deposit code
+was added to the shared program source, so today's source compiles a different minimal program. The
+mainnet program, the one the live covenant pins, is unchanged.
 
 ## Docker: the pinned toolchain
 
