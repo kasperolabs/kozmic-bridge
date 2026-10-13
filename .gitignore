@@ -1,0 +1,19 @@
+# secrets: never commit
+eth-rpc-url.txt
+eth-deployer-key.txt
+runpod-api-key.txt
+*-key.json
+.env
+# local runtime state (public snapshots live in deployments/)
+bridge-cp6-state.json
+bridge-state.json
+bridge-prover.log.jsonl
+bridge-prover.lock
+cp7-probe-*.json
+# build output
+node_modules/
+target/
+# bundles: keep image_id, journal, journal_hash, receipt.hex, timing.txt, inputs.cbor
+eth-prover/out*/receipt.succinct.bin
+eth-prover/out*/*.log
+eth-prover/out-auto-*/

@@ -1,0 +1,5 @@
+proved_in_seconds=142.37581276
+user_cycles=104501905
+total_cycles=111149056
+segments=106
+wrapped_in_seconds=71.635229351

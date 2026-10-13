@@ -1,0 +1,12 @@
+[package]
+name = "eth-bridge-primitives"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_cbor.workspace = true
+helios-consensus-core.workspace = true
+alloy-primitives.workspace = true
+alloy-trie.workspace = true

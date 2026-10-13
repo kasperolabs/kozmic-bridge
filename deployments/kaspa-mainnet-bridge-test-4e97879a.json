@@ -1,0 +1,87 @@
+{
+  "network": "mainnet",
+  "contract": "bridge/bridge.sil",
+  "silverscript": "kaspanet/silverscript@a0dd7448ccc7bad5b99140f2c8edbbd0b2a874f1",
+  "params": {
+    "imageId": "d7c7337682e590949ef78256a572d6a497c3230a9352627596f3342a8e1b5859",
+    "chainCommitment": "aa4a603657098a3fa5216f2908f45b3917bb248a3b2fe08a691b2c7333ace240",
+    "maxFee": "50000000"
+  },
+  "covenantId": "4e97879a4fe9fee3814ccd1576ef9743fa511a42abd6eff4580abd66140c42a7",
+  "genesisTxid": "9bece8dffc7066cc969eebfeebd0bfb66ea8babaf8a22d40e599560e811ea5b6",
+  "state": {
+    "header": "2eceb4af9153fa28120ba3103fa2fef816fe7bda3b1bb3c6b88171564c7c44ce",
+    "committee": "8aab693b0c6af3867bc69e19c0783b42f6dac0e4e62f073fc9fbaa3b9dac3b44"
+  },
+  "utxo": {
+    "txid": "d5fd63b5933952fd2ffd629d7806a4ac659bb03328e117d8c94ae8df52f8ca52",
+    "index": 0,
+    "amount": "87140800"
+  },
+  "address": "kaspa:pq2n5622tg57x47yu9szn2ak6rx9v3gp86l5y3vdz5l9umrdwux7ur6f9alum",
+  "history": [
+    {
+      "kind": "genesis",
+      "txid": "9bece8dffc7066cc969eebfeebd0bfb66ea8babaf8a22d40e599560e811ea5b6",
+      "header": "381b93f69ccc772fbe71d8093f0560343ca3e5c6893dcaae7e5f677ecfd823fb",
+      "committee": "8aab693b0c6af3867bc69e19c0783b42f6dac0e4e62f073fc9fbaa3b9dac3b44",
+      "at": "2026-10-12T16:46:32.107Z"
+    },
+    {
+      "kind": "measure",
+      "budget": 1550,
+      "nodeUsedUnits": "15510880",
+      "bundle": "eth-prover/out-fixture-gpu",
+      "at": "2026-10-12T16:47:02.255Z"
+    },
+    {
+      "kind": "advance",
+      "txid": "0fda7120a9fba8565edc5741da59d526e5d2aced9271ae17b49485e2ddbca26d",
+      "bundle": "eth-prover/out-fixture-gpu",
+      "budget": 1551,
+      "fee": "31429600",
+      "prevHeader": "381b93f69ccc772fbe71d8093f0560343ca3e5c6893dcaae7e5f677ecfd823fb",
+      "newHeader": "811ca9d0c05688129e10bc2f3cc9d093aa1c7a18bedf373cd890ae0e84229a3b",
+      "newCommittee": "8aab693b0c6af3867bc69e19c0783b42f6dac0e4e62f073fc9fbaa3b9dac3b44",
+      "newSlot": 24,
+      "localScriptUnits": 15511029,
+      "at": "2026-10-12T16:47:02.260Z"
+    },
+    {
+      "kind": "replay-rejected",
+      "bundle": "eth-prover/out-fixture-gpu",
+      "budget": 1560,
+      "error": "RPC Server (remote error) -> Rejected transaction 9a15bcecd54089ad271232a23d99eb50997fa9177147aa6a18a610a010308b2f: failed to verify the signature script: script ran, but verification failed",
+      "stateHeader": "811ca9d0c05688129e10bc2f3cc9d093aa1c7a18bedf373cd890ae0e84229a3b",
+      "at": "2026-10-12T16:47:32.427Z"
+    },
+    {
+      "kind": "measure",
+      "budget": 1550,
+      "nodeUsedUnits": "15510880",
+      "bundle": "eth-prover/out-fixture-step1",
+      "at": "2026-10-12T17:09:36.460Z"
+    },
+    {
+      "kind": "advance",
+      "txid": "d5fd63b5933952fd2ffd629d7806a4ac659bb03328e117d8c94ae8df52f8ca52",
+      "bundle": "eth-prover/out-fixture-step1",
+      "budget": 1551,
+      "fee": "31429600",
+      "prevHeader": "811ca9d0c05688129e10bc2f3cc9d093aa1c7a18bedf373cd890ae0e84229a3b",
+      "newHeader": "2eceb4af9153fa28120ba3103fa2fef816fe7bda3b1bb3c6b88171564c7c44ce",
+      "newCommittee": "8aab693b0c6af3867bc69e19c0783b42f6dac0e4e62f073fc9fbaa3b9dac3b44",
+      "newSlot": 72,
+      "localScriptUnits": 15511029,
+      "at": "2026-10-12T17:09:36.469Z"
+    },
+    {
+      "kind": "replay-rejected",
+      "bundle": "eth-prover/out-fixture-gpu",
+      "budget": 1560,
+      "error": "RPC Server (remote error) -> Rejected transaction f81cfb8df57d9425186b4419c6f567b1ce9837cb86c0c616232b08c4a9830c8e: failed to verify the signature script: script ran, but verification failed",
+      "stateHeader": "2eceb4af9153fa28120ba3103fa2fef816fe7bda3b1bb3c6b88171564c7c44ce",
+      "at": "2026-10-12T17:10:06.622Z"
+    }
+  ]
+}

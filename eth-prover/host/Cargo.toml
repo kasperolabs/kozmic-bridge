@@ -1,0 +1,41 @@
+[package]
+name = "eth-bridge-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "eth-prover"
+path = "src/main.rs"
+
+[dependencies]
+eth-bridge-primitives.workspace = true
+eth-bridge-methods.workspace = true
+risc0-zkvm.workspace = true
+helios-consensus-core.workspace = true
+helios-ethereum.workspace = true
+alloy-primitives.workspace = true
+alloy-trie.workspace = true
+tree_hash.workspace = true
+serde.workspace = true
+serde_cbor.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+dotenv.workspace = true
+sha2.workspace = true
+bincode = "1.3"
+borsh = { version = "1.5", features = ["derive"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+ssz = { package = "ethereum_ssz", version = "0.9" }
+snap = "1"
+serde_yaml = "0.9"
+
+[features]
+default = []
+prove = ["risc0-zkvm/prove"]
+cuda = ["risc0-zkvm/cuda"]

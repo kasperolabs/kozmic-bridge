@@ -1,0 +1,59 @@
+contract KCC20(byte[32] genesisPk, int genesisAmount, byte genesisIdentifierType, bool genesisIsMinter, int maxCovIns, int maxCovOuts) {
+    byte constant IDENTIFIER_PUBKEY = 0x00;
+    byte constant IDENTIFIER_SCRIPT_HASH = 0x01;
+    byte constant IDENTIFIER_COVENANT_ID = 0x02;
+    
+    byte[32] ownerIdentifier = genesisPk;
+    byte identifierType = genesisIdentifierType;
+    int amount = genesisAmount;
+    bool isMinter = genesisIsMinter;
+
+    function checkInputSig(sig s, byte witness) {
+        if(identifierType == IDENTIFIER_PUBKEY){
+            require(checkSig(s, pubkey(ownerIdentifier)));
+        } else if(identifierType == IDENTIFIER_SCRIPT_HASH){
+            byte[] spk = byte[](new ScriptPubKeyP2SH(ownerIdentifier));
+            require(tx.inputs[unsigned(witness)].scriptPubKey == spk);
+        } else if(identifierType == IDENTIFIER_COVENANT_ID){
+            require(OpCovInputCount(ownerIdentifier) > 0);
+        } else {
+            require(false);
+        }
+    }
+
+    function checkAmounts(State[] prevStates, State[] newStates) {
+        if(!isMinter){
+            int totalIn = 0;
+            for(i, 0, prevStates.length, maxCovIns) {
+                totalIn = totalIn + prevStates[i].amount;
+            }
+
+            int totalOut = 0;
+            for(i, 0, newStates.length, maxCovOuts) {
+                totalOut = totalOut + newStates[i].amount;
+            }
+
+            require(totalIn == totalOut);
+        }
+    }
+
+    function checkMintingTransfer(State[] newStates){
+        if(!isMinter){
+            for(i, 0, newStates.length, maxCovOuts) {
+                require(!newStates[i].isMinter);
+            }
+        }
+    }
+
+    #[covenant(binding = cov, from = maxCovIns, to = maxCovOuts)]
+    function transfer(State[] prevStates, State[] newStates, sig s, byte witness) {
+        checkInputSig(s, witness);
+        checkAmounts(prevStates, newStates);
+        checkMintingTransfer(newStates);
+    }
+
+    #[covenant.delegate]
+    function authorizeDelegate(sig s, byte witness) {
+        checkInputSig(s, witness);
+    }
+}

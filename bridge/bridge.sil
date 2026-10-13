@@ -1,0 +1,219 @@
+pragma silverscript ^0.1.0;
+
+// BRIDGE covenant: CP-4 + CP-5 + CP-6 of the Kaspa ZK bridge (Kaspero Labs).
+//
+// One UTXO carries the light-client state of Ethereum (the finalized beacon
+// header root the covenant trusts and the hash of the sync committee that must
+// sign the next step), the deposit cursor (the last Vault.sol nonce that has
+// been minted) and the covenant id of the KCC-20 token this instance mints.
+// A spend advances that state only on a RISC Zero Groth16 proof (tag 0x20)
+// that the pinned guest accepted a finality update from exactly this
+// (header, committee), and mints one token UTXO per deposit the journal
+// carries beyond the cursor, to the Kaspa address the depositor named on
+// Ethereum. No keys, no admin path, no termination.
+//
+// Journal layout (eth-prover/README.md, big-endian, 230 + 49n bytes):
+//   0   chain_commitment   32   pinned below as a constructor constant
+//   32  prev_header        32   must equal state.header
+//   64  prev_committee     32   must equal state.committee
+//   96  new_header         32   becomes state.header
+//   128 new_committee      32   becomes state.committee
+//   160 new_slot 8 | 168 exec_state_root 32 | 200 exec_block_number 8
+//   208 vault              20   must equal the pinned Vault.sol address
+//   228 deposit_count n     2
+//   230 deposits        49*n   nonce u64 | amount u64 | kaspa_spk (version byte + 32-byte payload)
+//
+// Token: a KCC20 covenant (silverscript-lang/tests/examples/kcc20.sil at the
+// pinned rev) whose minter branch is owned by this covenant's id
+// (IDENTIFIER_COVENANT_ID). The KCC20 contract lets a minter branch create
+// supply whenever an input of the owning covenant is present; this contract is
+// that input, and it dictates the exact set of KCC20 outputs: the minter branch
+// continues with amount 0, and every deposit beyond the cursor becomes one
+// recipient branch owned by the depositor's key (version 0 -> IDENTIFIER_PUBKEY)
+// or script hash (version 8 -> IDENTIFIER_SCRIPT_HASH). Token amounts are the
+// vault's uint64 amounts unchanged (6 decimals on both sides).
+//
+// Lifecycle: genesis (token = 0) -> init (one tx creates the KCC20 genesis,
+// a minter branch owned by this covenant, and records its covenant id) ->
+// advance (proof; zero new deposits = heartbeat, n new deposits = n mints).
+contract EthBridge(
+    byte[32] image_id,
+    byte[32] chain_commitment,
+    byte[20] vault,
+    int max_fee,
+    int token_prefix_len,
+    int token_suffix_len,
+    byte[32] token_template_hash,
+    byte[32] init_header,
+    byte[32] init_committee,
+    int init_cursor,
+    byte[32] init_token
+) {
+    byte[32] header = init_header;
+    byte[32] committee = init_committee;
+    int cursor = init_cursor;
+    byte[32] token = init_token;
+
+    // KCC20 state layout (field order and sizes must match kcc20.sil).
+    struct KCC20State {
+        byte[32] ownerIdentifier;
+        byte identifierType;
+        int amount;
+        bool isMinter;
+    }
+
+    byte constant IDENTIFIER_PUBKEY = 0x00;
+    byte constant IDENTIFIER_SCRIPT_HASH = 0x01;
+    byte constant IDENTIFIER_COVENANT_ID = 0x02;
+    int constant MAX_DEPOSITS = 4;
+    int constant JOURNAL_FIXED_LEN = 230;
+    int constant DEPOSIT_LEN = 49;
+    byte[32] constant ZERO32 = byte[32](0x0000000000000000000000000000000000000000000000000000000000000000);
+
+    // Big-endian u64 at j[off..off+8] as an int (script numbers are
+    // little-endian, so the bytes are reversed; values stay below 2^63).
+    function be64(byte[] j, int off) : int {
+        return int(byte[8](
+            j.slice(off + 7, off + 8) + j.slice(off + 6, off + 7) + j.slice(off + 5, off + 6) + j.slice(off + 4, off + 5)
+          + j.slice(off + 3, off + 4) + j.slice(off + 2, off + 3) + j.slice(off + 1, off + 2) + j.slice(off, off + 1)));
+    }
+
+    // The successor keeps the covenant's value, less at most max_fee. Whatever
+    // the spender takes out (fee, KAS carried by the token outputs) comes out
+    // of that allowance, so one spend can never drain the covenant.
+    function keepValue() {
+        int out_idx = OpAuthOutputIdx(this.activeInputIndex, 0);
+        require(tx.outputs[out_idx].value >= tx.inputs[this.activeInputIndex].value - max_fee);
+    }
+
+    // CP-6 init: bind this covenant to a fresh KCC20 token. The tx has exactly
+    // two outputs: our successor (0) and the KCC20 genesis (1), a minter branch
+    // owned by this covenant id with amount 0. The genesis must be a covenant
+    // genesis (no input carries its id), so the id is fresh and this output is
+    // the only member of its genesis group: nobody can bring a second minter
+    // branch of the same token into existence. Anyone may submit init; every
+    // valid init yields the same token state, and the id is recorded here once.
+    #[covenant.singleton(mode = transition)]
+    function init(State prev_state, byte[] token_prefix, byte[] token_suffix) : (State) {
+        require(prev_state.token == ZERO32);
+        require(tx.outputs.length == 2);
+        require(OpAuthOutputIdx(this.activeInputIndex, 0) == 0);
+        byte[32] new_token = OpOutputCovenantId(1);
+        require(new_token != ZERO32);
+        require(OpCovInputCount(new_token) == 0);
+        validateOutputStateWithTemplate(
+            1,
+            KCC20State {
+                ownerIdentifier: OpInputCovenantId(this.activeInputIndex),
+                identifierType: IDENTIFIER_COVENANT_ID,
+                amount: 0,
+                isMinter: true
+            },
+            token_prefix,
+            token_suffix,
+            token_template_hash
+        );
+        keepValue();
+        return(State {
+            header: prev_state.header,
+            committee: prev_state.committee,
+            cursor: prev_state.cursor,
+            token: new_token
+        });
+    }
+
+    // CP-4/5/6 advance: verify the proof, move the light-client state forward,
+    // mint every deposit the journal carries beyond the cursor.
+    #[covenant.singleton(mode = transition)]
+    function advance(State prev_state, byte[] journal, byte[] proof) : (State) {
+        require(journal.length >= JOURNAL_FIXED_LEN);
+
+        // CP-4: the SDK's RISC Zero Groth16 verifier fragment, emitted by the
+        // compiler (append_r0_groth16_verifier_dynamic_image_id, SDK 2.1.0,
+        // risc0 3.0.4 control root). The journal hash is computed here, so the
+        // fields read below are exactly the bytes the guest committed.
+        r0.g16.verify(sha256(journal), proof, image_id);
+
+        require(byte[32](journal.slice(0, 32)) == chain_commitment);
+        require(byte[32](journal.slice(32, 64)) == prev_state.header);
+        require(byte[32](journal.slice(64, 96)) == prev_state.committee);
+        require(byte[20](journal.slice(208, 228)) == vault);
+
+        int n = int(byte[2](journal.slice(229, 230) + journal.slice(228, 229)));
+        require(journal.length == JOURNAL_FIXED_LEN + DEPOSIT_LEN * n);
+        require(n <= MAX_DEPOSITS);
+
+        // Deposits at or below the cursor were minted by an earlier advance and
+        // are skipped (a prover may include them; they are never minted twice).
+        // Each deposit beyond the cursor is minted as the k-th token output,
+        // k = 1, 2, ... after the continuing minter branch at k = 0.
+        int mints = 0;
+        int last_nonce = prev_state.cursor;
+        for (i, 0, n, MAX_DEPOSITS) {
+            int off = JOURNAL_FIXED_LEN + DEPOSIT_LEN * i;
+            int nonce = be64(journal, off);
+            if (nonce > prev_state.cursor) {
+                require(nonce > last_nonce);
+                int amount = be64(journal, off + 8);
+                require(amount > 0);
+                int version = int(byte[1](journal.slice(off + 16, off + 17)));
+                require(version == 0 || version == 8);
+                validateOutputStateWithInputTemplate(
+                    OpCovOutputIdx(prev_state.token, 1 + mints),
+                    KCC20State {
+                        ownerIdentifier: byte[32](journal.slice(off + 17, off + 49)),
+                        identifierType: version == 8 ? IDENTIFIER_SCRIPT_HASH : IDENTIFIER_PUBKEY,
+                        amount: amount,
+                        isMinter: false
+                    },
+                    OpCovInputIdx(prev_state.token, 0),
+                    token_prefix_len,
+                    token_suffix_len,
+                    token_template_hash
+                );
+                mints = mints + 1;
+                last_nonce = nonce;
+            }
+        }
+
+        if (mints == 0) {
+            // Heartbeat: the token is not touched at all, so the minter branch
+            // can neither be burned nor moved under cover of a plain advance.
+            require(OpCovInputCount(prev_state.token) == 0);
+            require(OpCovOutputCount(prev_state.token) == 0);
+        } else {
+            // Exactly one token input (the minter branch) and exactly 1 + mints
+            // token outputs: the continuing minter branch, then the recipients
+            // validated above, in journal order. The KCC20 contract validates
+            // its own transition against the same states; this contract decides
+            // what those states are.
+            require(prev_state.token != ZERO32);
+            require(OpCovInputCount(prev_state.token) == 1);
+            require(OpCovOutputCount(prev_state.token) == 1 + mints);
+            validateOutputStateWithInputTemplate(
+                OpCovOutputIdx(prev_state.token, 0),
+                KCC20State {
+                    ownerIdentifier: OpInputCovenantId(this.activeInputIndex),
+                    identifierType: IDENTIFIER_COVENANT_ID,
+                    amount: 0,
+                    isMinter: true
+                },
+                OpCovInputIdx(prev_state.token, 0),
+                token_prefix_len,
+                token_suffix_len,
+                token_template_hash
+            );
+        }
+
+        keepValue();
+
+        // CP-5: the successor (same template, same covenant id, enforced by the
+        // generated wrapper) carries the new header, committee and cursor.
+        return(State {
+            header: byte[32](journal.slice(96, 128)),
+            committee: byte[32](journal.slice(128, 160)),
+            cursor: last_nonce,
+            token: prev_state.token
+        });
+    }
+}

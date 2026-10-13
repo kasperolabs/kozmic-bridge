@@ -1,0 +1,210 @@
+{
+  "network": "mainnet",
+  "contract": "bridge/bridge.sil",
+  "token": "bridge/kcc20.sil",
+  "silverscript": "kaspanet/silverscript@a0dd7448ccc7bad5b99140f2c8edbbd0b2a874f1",
+  "params": {
+    "imageId": "4756d736d00cc0e5b813fd9bbb8fe586dbfe9cee524e61e79335cc2585413a50",
+    "chainCommitment": "ffc6300b0673ffdeaa10b11d162bc7bc375514c89e29dd03dc6eeabd88b0c90b",
+    "vault": "3dd8cd71c3efe664d4db96d30fbfecbeea06d529",
+    "maxFee": "500000000",
+    "tokenTemplateHash": "b5323a04194ba2343adf8fc08da9cfe746aa2a4baef74b1a18ee518b508b45cf",
+    "tokenPrefixLen": 1,
+    "tokenSuffixLen": 2615,
+    "tokenMaxCovIns": 4,
+    "tokenMaxCovOuts": 5
+  },
+  "covenantId": "ac21e83194b0beb1ae8c932a4734984f692ab982f6739037af6f979aef0dea0b",
+  "genesisTxid": "6f98c736fbc661a5affbda8cf86d27760f0c4e9bfdfad55a8a897ebf220be080",
+  "tokenId": "87b503510d715acfa3cca82f245e696593c30d78dde70e11e69afa88b3d03a3f",
+  "state": {
+    "committee": "c68d24d76079e1e13d4e7f519ae68c278a8e21645ddbcf2b071c35a2f0e08e72",
+    "cursor": 3,
+    "header": "0d3f1e430ee030eed5736d6e00057d4b310c9dd3244dae11d5ca08fcd33e3a2b",
+    "token": "87b503510d715acfa3cca82f245e696593c30d78dde70e11e69afa88b3d03a3f"
+  },
+  "utxo": {
+    "txid": "568bedc542e6ed51ce6ecbbef0968a730d43b049f95150d37960ca7a86f44aaf",
+    "index": 0,
+    "amount": "1493565200"
+  },
+  "address": "kaspa:ppjjmekxz20uq9np7swrylam0esk4zjjkf5ndm84wfr0redcz5q4kp3r6a95u",
+  "minter": {
+    "txid": "568bedc542e6ed51ce6ecbbef0968a730d43b049f95150d37960ca7a86f44aaf",
+    "index": 1,
+    "amount": "100000000",
+    "address": "kaspa:ppfk57wxszm8p98nxwh6altu9assmdj6geslruvazy0lsww04d8wcvz0ye432"
+  },
+  "tokens": [
+    {
+      "txid": "e108d4161c14883e05940c933b616acbc119a0163e2380e16ef9782481d00f99",
+      "index": 2,
+      "value": "100000000",
+      "nonce": 1,
+      "amount": 1000000,
+      "owner": "856bc60330866c89f02fc502c265416b906e4c4eb7b2bab38af18c6f36e6829c",
+      "ownerType": 0,
+      "ownerAddress": "kaspa:qzzkh3srxzrxez0s9lzs9sn9g94eqmjvf6mm9w4n3tcccmeku6pfc5vuun3t2",
+      "address": "kaspa:pqds78m3p6vg9quz02x4dlm46j992vud3xvwm3r0ft7ntsyurglv2rpqdma33",
+      "spent": "6cf4a2afa5e732473d532cf6d34ec22f5e9f991d4344ad4c5810bc722debdf33"
+    },
+    {
+      "txid": "e108d4161c14883e05940c933b616acbc119a0163e2380e16ef9782481d00f99",
+      "index": 3,
+      "value": "100000000",
+      "nonce": 2,
+      "amount": 2500000,
+      "owner": "5bf352ff28b58d2dc6038893f344305073d027f87aac8e3a880b4dbde517eaed",
+      "ownerType": 0,
+      "ownerAddress": "kaspa:qpdlx5hl9z6c6twxqwyf8u6yxpg885p8lpa2er363q95m009zl4w629zj9juj",
+      "address": "kaspa:pp4xq3px9ns7nquxtss895ydpg3awmkrykm6d6p9hufv3jhu0v6gu8stvn67u"
+    },
+    {
+      "txid": "6cf4a2afa5e732473d532cf6d34ec22f5e9f991d4344ad4c5810bc722debdf33",
+      "index": 0,
+      "value": "42614000",
+      "nonce": null,
+      "owner": "5bf352ff28b58d2dc6038893f344305073d027f87aac8e3a880b4dbde517eaed",
+      "ownerType": 0,
+      "amount": "400000",
+      "ownerAddress": "kaspa:qpdlx5hl9z6c6twxqwyf8u6yxpg885p8lpa2er363q95m009zl4w629zj9juj",
+      "address": "kaspa:pp7dcrvj92lm7pw5e3pp6wus0x48lj5rgw2pdy3wh2cclech642u7p4lfrygg"
+    },
+    {
+      "txid": "6cf4a2afa5e732473d532cf6d34ec22f5e9f991d4344ad4c5810bc722debdf33",
+      "index": 1,
+      "value": "42614000",
+      "nonce": null,
+      "owner": "856bc60330866c89f02fc502c265416b906e4c4eb7b2bab38af18c6f36e6829c",
+      "ownerType": 0,
+      "amount": "600000",
+      "ownerAddress": "kaspa:qzzkh3srxzrxez0s9lzs9sn9g94eqmjvf6mm9w4n3tcccmeku6pfc5vuun3t2",
+      "address": "kaspa:prlhg236zfh5t3dm0y7lg2pvl60lmhmjfj2umtazuf5cpx48ahhjjv8cdskhr"
+    },
+    {
+      "txid": "568bedc542e6ed51ce6ecbbef0968a730d43b049f95150d37960ca7a86f44aaf",
+      "index": 2,
+      "value": "100000000",
+      "nonce": 3,
+      "amount": 500000,
+      "owner": "5bf352ff28b58d2dc6038893f344305073d027f87aac8e3a880b4dbde517eaed",
+      "ownerType": 0,
+      "ownerAddress": "kaspa:qpdlx5hl9z6c6twxqwyf8u6yxpg885p8lpa2er363q95m009zl4w629zj9juj",
+      "address": "kaspa:pqru5m0dkccgknxk4sdeup8yuv0ucf3vqgzpe9tymqll93u4t6vayltc2w7lv"
+    }
+  ],
+  "history": [
+    {
+      "kind": "genesis",
+      "txid": "6f98c736fbc661a5affbda8cf86d27760f0c4e9bfdfad55a8a897ebf220be080",
+      "header": "a63ca4809a7aba3c4347b267350df7570a44a641f277878a82542b73e5548e72",
+      "committee": "c68d24d76079e1e13d4e7f519ae68c278a8e21645ddbcf2b071c35a2f0e08e72",
+      "at": "2026-10-12T20:52:49.930Z"
+    },
+    {
+      "kind": "init",
+      "txid": "004a4d280e5fc64b2072d0408df7c78df61c5ca01cbfd33ffc413f28bb8e8ad9",
+      "tokenId": "87b503510d715acfa3cca82f245e696593c30d78dde70e11e69afa88b3d03a3f",
+      "budgets": [
+        5
+      ],
+      "fee": "8022800",
+      "localScriptUnits": [
+        55812
+      ],
+      "at": "2026-10-12T20:53:21.238Z"
+    },
+    {
+      "kind": "advance",
+      "txid": "e108d4161c14883e05940c933b616acbc119a0163e2380e16ef9782481d00f99",
+      "bundle": "eth-prover/out-deposit-12",
+      "budgets": [
+        1562,
+        5
+      ],
+      "fee": "33256800",
+      "prevHeader": "a63ca4809a7aba3c4347b267350df7570a44a641f277878a82542b73e5548e72",
+      "newHeader": "6dc6c279c8bf03e4de767d69585e02215e6ea6ee049d417ce8fe965fd830a3e5",
+      "newCommittee": "c68d24d76079e1e13d4e7f519ae68c278a8e21645ddbcf2b071c35a2f0e08e72",
+      "newSlot": 15417696,
+      "mints": [
+        1,
+        2
+      ],
+      "cursor": 2,
+      "localScriptUnits": [
+        15627754,
+        40709
+      ],
+      "at": "2026-10-12T20:56:27.225Z"
+    },
+    {
+      "kind": "replay-rejected",
+      "bundle": "eth-prover/out-deposit-12",
+      "budgets": [
+        1560
+      ],
+      "error": "RPC Server (remote error) -> Rejected transaction f6d8f75967e6947166779f1398a54b2e4a771f3db09109b5edb107c93c317a43: failed to verify the signature script: script ran, but verification failed",
+      "stateHeader": "6dc6c279c8bf03e4de767d69585e02215e6ea6ee049d417ce8fe965fd830a3e5",
+      "cursor": 2,
+      "at": "2026-10-12T20:57:30.055Z"
+    },
+    {
+      "kind": "transfer",
+      "txid": "6cf4a2afa5e732473d532cf6d34ec22f5e9f991d4344ad4c5810bc722debdf33",
+      "from": "kaspa:qzzkh3srxzrxez0s9lzs9sn9g94eqmjvf6mm9w4n3tcccmeku6pfc5vuun3t2",
+      "to": "kaspa:qpdlx5hl9z6c6twxqwyf8u6yxpg885p8lpa2er363q95m009zl4w629zj9juj",
+      "amount": "400000",
+      "budgets": [
+        12
+      ],
+      "fee": "14773000",
+      "localScriptUnits": [
+        129572
+      ],
+      "at": "2026-10-12T20:58:07.289Z"
+    },
+    {
+      "kind": "advance",
+      "txid": "e7fc633a760c9f7731dec8dd799f772bb046e7aede858b6c81fdb80e93fcd5e1",
+      "bundle": "eth-prover/out-auto-2026-10-13T00-24-35-732Z",
+      "budgets": [
+        1553
+      ],
+      "fee": "32108200",
+      "prevHeader": "6dc6c279c8bf03e4de767d69585e02215e6ea6ee049d417ce8fe965fd830a3e5",
+      "newHeader": "63d72f9fd7d0bba22cff0736a12ba63bcd9491806943668759776135342bb1e5",
+      "newCommittee": "c68d24d76079e1e13d4e7f519ae68c278a8e21645ddbcf2b071c35a2f0e08e72",
+      "newSlot": 15418848,
+      "mints": [],
+      "cursor": 2,
+      "localScriptUnits": [
+        15534722
+      ],
+      "at": "2026-10-13T00:32:59.121Z"
+    },
+    {
+      "kind": "advance",
+      "txid": "568bedc542e6ed51ce6ecbbef0968a730d43b049f95150d37960ca7a86f44aaf",
+      "bundle": "eth-prover/out-auto-2026-10-13T00-49-24-916Z",
+      "budgets": [
+        1559,
+        3
+      ],
+      "fee": "33047000",
+      "prevHeader": "63d72f9fd7d0bba22cff0736a12ba63bcd9491806943668759776135342bb1e5",
+      "newHeader": "0d3f1e430ee030eed5736d6e00057d4b310c9dd3244dae11d5ca08fcd33e3a2b",
+      "newCommittee": "c68d24d76079e1e13d4e7f519ae68c278a8e21645ddbcf2b071c35a2f0e08e72",
+      "newSlot": 15418976,
+      "mints": [
+        3
+      ],
+      "cursor": 3,
+      "localScriptUnits": [
+        15592137,
+        29219
+      ],
+      "at": "2026-10-13T00:53:23.374Z"
+    }
+  ]
+}

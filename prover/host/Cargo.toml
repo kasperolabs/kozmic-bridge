@@ -1,0 +1,11 @@
+[package]
+name = "host"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+methods = { path = "../methods" }
+risc0-zkvm = { workspace = true }
+borsh = { workspace = true }
+hex = { workspace = true }
+sha2 = { workspace = true }
