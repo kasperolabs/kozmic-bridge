@@ -170,10 +170,8 @@ docker build -f docker/Dockerfile.cuda --target ids --output type=local,dest=. .
 cat IMAGE_IDS.txt   # eth-bridge-guest (mainnet spec) image id: 4756d736d00cc0e5b813fd9bbb8fe586dbfe9cee524e61e79335cc2585413a50
 ```
 
-Verified 2026-10-13 with a fresh BuildKit builder and no cache. The minimal-spec id printed next to it
-differs from the one in the test bundles (`d7c73376…`): those bundles were proven before the deposit code
-was added to the shared program source, so today's source compiles a different minimal program. The
-mainnet program, the one the live covenant pins, is unchanged.
+Verified 2026-10-13 with a fresh BuildKit builder and no cache. The command also prints the id of a
+minimal-spec test program; only the mainnet id above matters for the live covenant.
 
 ## Docker: the pinned toolchain
 
@@ -357,8 +355,8 @@ again.
 | [`bin/`](bin) | `bridge-prover.mjs` (the prover service), `bridge.mjs` (deploy, advance, transfer), helpers |
 | [`deployments/`](deployments) | the mainnet instances: covenant ids, parameters, every transaction |
 | `eth-prover/out-*/` | proof bundles of every mainnet advance, with the inputs to re-prove them |
-| [`docs/`](docs) | internal pages: the Kaspa ZK precompile test suite this project grew out of, the engineering handoff |
-| `src/`, `test/`, `fixtures/`, `prover/`, `vendor/` | the precompile test suite and its fixtures, a toy RISC Zero program, the Kaspa WASM SDK 2.1.0 |
+| [`docs/`](docs) | research on the way back: what Ethereum would need to verify about Kaspa ([`KASPA-OUTBOUND-STUDY.md`](docs/KASPA-OUTBOUND-STUDY.md)) |
+| `src/`, `test/`, `fixtures/`, `prover/`, `vendor/` | the Kaspa ZK precompile tests this project grew out of, a toy RISC Zero program, the Kaspa WASM SDK 2.1.0 |
 
 ## Roadmap
 
