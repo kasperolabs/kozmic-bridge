@@ -12,8 +12,8 @@ no relayer with keys, no admin. Live on mainnet since 2026-10-12.
 
 ## What happened on 2026-10-13
 
-At 00:35:23 UTC someone deposited 0.5 KBT into the vault on Ethereum, naming a Kaspa address as
-the recipient. Nobody did anything else. Eighteen and a half minutes later the token was on Kaspa:
+At 00:35:23 UTC we deposited 0.5 KBT into the vault on Ethereum, naming a Kaspa address as
+the recipient, and then did nothing else. Eighteen and a half minutes later the token was on Kaspa:
 
 | step | when (UTC) | evidence |
 |---|---|---|
