@@ -1,199 +1,212 @@
-# kaspa-zk-tests  (v1.0)
+# Kozmic
 
-ZK-opened UTXOs on Kaspa L1 after the Toccata hard fork (mainnet since 2026-06-30).
+**A trustless bridge from Ethereum to Kaspa L1.** Tokens deposited into a contract on Ethereum
+appear as KCC-20 tokens on Kaspa, minted by a covenant that accepts nothing but a zero-knowledge
+proof of what Ethereum's own validators finalized. No custodian, no multisig, no relayer with keys,
+no admin. Live on mainnet since 2026-10-12.
 
-Three things, in the order they were proven on mainnet:
+> **Status: one-way, test token.** What runs today bridges KBT, a self-minted test ERC-20 with no
+> value, from Ethereum to Kaspa. Tokens cannot go back yet: the Ethereum vault has no withdraw
+> function. See [What it does not do (yet)](#what-it-does-not-do-yet).
 
-1. **A UTXO opened by a Groth16 proof and nothing else.** No key, no signer.
-   Mainnet txid `8d7700f4c007c7f98082f03239416035b9af95b46e9015737f77a7e741097205`.
-   The same transaction with one proof byte flipped was rejected by the node's script engine.
-2. **The exact compute budget**, measured on mainnet with free under-budget rejections:
-   a 5-input Groth16 P2SH spend needs **budget 1550** (`used=15,500,893` script units =
-   14,000,000 precompile + 6 x 250,000 VK elements + 893 for hashing the redeem script).
-   Mainnet txid `e1ee18140a6ec3a7e4745e9b175e5895bd6df45643ae41ea0f33e76866217a3b`.
-3. **A covenant pinned to a program you wrote** (`prover/`): a RISC Zero guest that proves
-   "this melody is in key and ends on the tonic" without revealing the melody, wrapped to
-   Groth16 and spent through the SDK's `ZkScriptBuilder`.
+## What happened on 2026-10-13
 
-## Status
+At 00:35:23 UTC someone deposited 0.5 KBT into the vault on Ethereum, naming a Kaspa address as
+the recipient. Nobody did anything else. Eighteen and a half minutes later the token was on Kaspa:
 
-| part | state |
+| step | when (UTC) | evidence |
+|---|---|---|
+| deposit #3 into the vault on Ethereum: 0.5 KBT to `kaspa:qpdlx5hl9z6c6twxqwyf8u6yxpg885p8lpa2er363q95m009zl4w629zj9juj` | 00:35:23 | [tx `0x29e6f6a8…`](https://etherscan.io/tx/0x29e6f6a874164b38c556abd32dbcfb3adc262e06238b46bfb8f3ce4107a419b0), block 26,180,018 |
+| Ethereum finalizes the block (sync committee signs a finalized beacon header covering it) | ~00:49 | finalized header `0x0d3f1e43…3a2b`, committed in the proof's journal |
+| the prover service notices, rents a GPU for 164 s, proves, wraps the proof to Groth16 | 00:49 to 00:53 | bundle [`eth-prover/out-deposit-3/`](eth-prover/out-deposit-3) |
+| the Kaspa covenant verifies the proof on chain and mints 0.5 KBT to the named address | 00:53:52 | [Kaspa tx `568bedc5…`](https://explorer.kaspa.org/txs/568bedc542e6ed51ce6ecbbef0968a730d43b049f95150d37960ca7a86f44aaf) |
+
+Total cost of that mint: about $0.05 of rented GPU time and 0.33 KAS in Kaspa fees, plus 1 KAS
+that travels with the token output (Kaspa's storage-mass rule). Every other mainnet transaction
+of this bridge, including the rejected replays, is listed in [`bridge/README.md`](bridge/README.md#mainnet-record).
+
+## How it works
+
+```
+ Ethereum                          prover (anyone can run it)              Kaspa L1
+ --------                          -------------------------               --------
+ Vault.sol                         1. read the light-client data           BRIDGE covenant
+   deposit(amount, kaspa address)     Ethereum's validators signed           state: last trusted Ethereum
+   stores (nonce, amount, address) 2. run the RISC Zero program:                    header + its validator set,
+   no owner, no withdraw              - verify the validators' signatures         last minted deposit nonce
+                                      - verify the deposit is in the       advance(journal, proof):
+                                        finalized Ethereum state             - verify the Groth16 proof
+                                      - publish a journal: old header,       - journal must start from the
+                                        new header, deposits                   state it holds
+                                   3. wrap the proof to Groth16            - mint each new deposit to the
+                                      (128 bytes)                              address in the journal
+                                   4. submit it to Kaspa                   KCC-20 token (KBT on Kaspa)
+```
+
+1. **Deposit.** `Vault.sol` takes the ERC-20 and records `(nonce, amount, Kaspa address)` in its
+   storage. It has no owner and no other function: whatever enters stays.
+2. **Finality.** Ethereum finalizes the block in 13 to 30 minutes. A rotating committee of 512
+   validators (the sync committee) signs the finalized header. This is the data Ethereum's own
+   light clients use, and it is self-verifying: a forged update fails the signature check.
+3. **Proof.** A RISC Zero program (`eth-prover/`, a port of RISC Zero's audited
+   [r0vm-helios](https://github.com/risc0/r0vm-helios) on top of a16z's
+   [Helios](https://github.com/a16z/helios)) checks the committee's BLS signatures, follows any
+   committee rotations, and checks Merkle-Patricia proofs that the vault's storage holds the
+   deposit at the finalized state root. Its output, the journal, is 230 bytes plus 49 per deposit.
+   The proof is wrapped into a 128-byte Groth16 proof.
+4. **Mint.** The Kaspa covenant (`bridge/bridge.sil`, Silverscript) verifies the proof with
+   Kaspa's `OpZkPrecompile` against a pinned program id, then checks that the journal continues
+   exactly from the header and committee it holds, names Ethereum mainnet and this vault, and
+   mints one KCC-20 output per deposit it has not minted before, to exactly the address the
+   depositor named. The successor covenant carries the new state.
+
+Why nobody can cheat:
+
+- **A proof from another program** fails: the covenant pins the program's image id
+  (`4756d736…`).
+- **A proof that skips or invents Ethereum history** fails: the covenant pins the last finalized
+  header *and* the hash of the validator committee that must sign the next one, so a prover cannot
+  pick its own committee.
+- **A replayed proof** fails: its starting header is no longer the covenant's state (tested on
+  mainnet, rejected by the node).
+- **Front-running** gains nothing: the recipient is part of the proven journal, and the covenant
+  enforces it.
+- **A double mint** fails: the covenant keeps a deposit cursor; deposits at or below it are skipped.
+- **A malicious prover** can at most stall the bridge, never move or create tokens. The prover
+  holds no keys.
+
+## What it does not do (yet)
+
+- **No way back.** Redeeming KBT on Kaspa for the ERC-20 on Ethereum needs Ethereum to verify a
+  proof of Kaspa's consensus (PoW and GHOSTDAG) that a burn happened. That proof has not been
+  built. The current vault cannot release anything, by design, and never will.
+- **Test token only.** The vault accepts KBT, a test ERC-20 with no value. A capped USDC instance
+  is planned after the redemption design is settled.
+- **No cap on the vault.** Its only limit is that it accepts KBT and nothing else.
+- **Wallet display.** The token is Silverscript's covenant-state KCC-20 (`kcc20.sil`). Wallets
+  that do not recognize its template (Kasla, today) do not show it, though it exists and is
+  spendable.
+- **Latency is Ethereum's finality**, 15 to 35 minutes, plus a few minutes of proving. There is no
+  fast path, and there will not be one inside the bridge itself.
+- **Ethereum's next fork (Glamsterdam, "Gloas")** changes the light-client header format. This
+  program reads the execution state root from it and will need a new version, which means a new
+  covenant instance.
+
+## Trust assumptions
+
+You trust: Ethereum's sync committee (two thirds of 512 validators, the same assumption every
+Ethereum light client makes); RISC Zero's proof system and its Groth16 trusted setup; the code
+of the vault, the program and the covenant, all in this repository; that the program id pinned on
+Kaspa (`4756d736…`) was built from this source (reproduce it, below).
+
+You do not trust: us, the prover operator, the beacon or RPC endpoints the prover reads from, or
+anyone holding a key. There are no keys.
+
+## Verify it yourself
+
+**On chain.** The Ethereum deposit and vault are on Etherscan. On Kaspa, read transactions from a
+node (explorers only partly decode Kaspa's v1 transactions with covenants yet). The bridge is
+covenant id `ac21e83194b0beb1ae8c932a4734984f692ab982f6739037af6f979aef0dea0b`, the token is
+covenant id `87b503510d715acfa3cca82f245e696593c30d78dde70e11e69afa88b3d03a3f`.
+
+**The proof, locally, without spending anything.** `bridge/` runs the real rusty-kaspa 2.1.0
+script engine over the real mainnet proofs: valid spends accepted, replays, wrong recipients,
+inflated amounts, foreign programs and flipped journal bytes rejected.
+
+```
+cd bridge && cargo test --release -- --test-threads=1
+```
+
+**The journal of any proof:**
+
+```
+cd eth-prover && cargo build --release
+./target/release/eth-prover journal --file out-deposit-3/journal.hex
+```
+
+**The program id.** The id pinned on Kaspa comes from the Docker build below. Reproducing it is
+the one check no explorer can do for you.
+
+> *Draft note (private review):* a GPU-free build target that prints the image id is being added;
+> the CUDA image cannot print it on a machine without an NVIDIA driver.
+
+## Docker: the pinned toolchain
+
+The prover depends on exact versions that must agree with each other and with Kaspa:
+`risc0-zkvm 3.0.4` (the version whose Groth16 control root Kaspa's SDK 2.1.0 embeds), the guest
+Rust toolchain 1.94.1, patched crates pinned in `Cargo.lock`, and accelerated BLS12-381, SHA-2 and
+Keccak forks. Installing this by hand is possible (`eth-prover/README.md`) but easy to get subtly
+wrong: a different toolchain builds a different program with a different id, which the covenant
+rejects. **Use the image.**
+
+```
+docker pull kasperolabs/eth-prover:cuda
+```
+
+| | |
 |---|---|
-| `test/` 32 offline tests | passing |
-| `bin/live.mjs`, `bin/measure.mjs` | run on mainnet, results above |
-| `bin/r0spend.mjs` with `fixtures/r0-example` (SDK's own RISC Zero receipt) | scripts build and match the SDK; address `kaspa:prr6mc7myqn2umzt758qhv2gnvahrqapq0d5zwul4y5t55gexw55geyupwjud`; not yet spent on chain |
-| `prover/` (Rust, risc0-zkvm 3.0.4) | written against the 3.0 API, **not compiled in the authoring environment** (no crates.io there). Expect at most small API fixes on first build. |
+| Dockerfile | [`eth-prover/docker/Dockerfile.cuda`](eth-prover/docker/Dockerfile.cuda) |
+| build it yourself | `cd eth-prover && docker build -f docker/Dockerfile.cuda -t kasperolabs/eth-prover:cuda .` (x86_64, no GPU needed, ~30 min first build) |
+| what it contains | `eth-prover` built with CUDA kernels for sm_80, sm_86, sm_89, sm_90 (A100, RTX 30xx, RTX 40xx / L40S / L4, H100); sshd for rented GPU machines |
+| what it is used for | `eth-prover prove --no-wrap` on a GPU: ~2 s per million cycles on an RTX 4090 or L40S; a plain step is ~55M cycles |
+| what runs elsewhere | the Groth16 wrap (`eth-prover wrap`, 71 s on CPU) uses RISC Zero's own `risczero/risc0-groth16-prover` image on any x86_64 Docker host |
+| image id it produces | `4756d736d00cc0e5b813fd9bbb8fe586dbfe9cee524e61e79335cc2585413a50` |
 
-## How the program-pinned covenant works (the thing to explain to others)
+No GPU of your own? The prover service rents one per proof through the Runpod API and deletes it
+when the proof is done: a few cents per proof (`bin/bridge-prover.mjs`).
 
-A RISC Zero guest is an ordinary Rust program. Proving it yields a receipt with three parts:
-the **image id** (a hash of the program: *which* program ran), the **journal** (bytes the
-program chose to publish: *what it said*), and the **seal** (the proof that this program really
-produced this journal). Private inputs never appear. The Groth16 wrap is a proof about that
-proof, 128 bytes, checkable by the BN254 pairing opcode.
+## Run a prover
 
-On Kaspa, the redeem script pins the image id (`ZkScriptBuilder.commitToGroth16(imageId)`),
-which embeds RISC Zero's fixed verifying key and the code to rebuild the receipt claim from
-image id + journal hash in script. The spender pushes the journal hash and the proof
-(`finalizeWithGroth16Proof(receipt, journalHash)`). `OpZkPrecompile` checks the pairing; it fails
-for any other program, any other journal, or any altered byte. Anything the covenant then does
-with the journal (pay the address it names, advance a counter) is ordinary script.
+Anyone can run one; it holds no keys and cannot mint anything a valid proof does not carry.
+Requirements: an x86_64 Linux box with Docker and Node 20, a Kaspa node's wRPC (Borsh) endpoint,
+an Ethereum execution RPC that serves `eth_getProof` (a free tier works), and a GPU (yours, or a
+Runpod API key with a small prepaid balance). No Ethereum node.
 
-That structure is the bridge: private witness (melody / foreign-chain data), public rule (in key /
-validly finalized), public output (hash / deposit amount and recipient), program pinned by image id.
+```
+pm2 start "node bin/bridge-prover.mjs --url ws://127.0.0.1:17110" --name bridge-prover
+```
 
-No npm dependencies. Node 22+. The Kaspa WASM SDK v2.1.0 (the consensus code compiled to
-wasm) is vendored under `vendor/kaspa`, taken from the rusty-kaspa v2.1.0 GitHub release.
-The ZK precompile interface, pricing and limits are identical in v2.0.0, v2.0.1 and v2.1.0
-(verified by diffing `crypto/txscript/src/zk_precompiles` across the tags).
+Every 60 seconds it reads Ethereum's latest finalized header and the vault's deposit counter. When
+a new deposit is final, it proves and submits; when nothing happens for a week, it submits a
+heartbeat so the covenant keeps up with Ethereum's validator rotations. Details, log events and
+costs: [`bridge/README.md`](bridge/README.md#the-prover-service-cp-7).
 
-## What is in here
+## Numbers
+
+| | |
+|---|---|
+| deposit to mint | 18.5 min measured (13.8 min Ethereum finality, 4.5 min proving and submitting) |
+| proof size on Kaspa | 128-byte Groth16 proof, journal 230 + 49 bytes per deposit |
+| Kaspa compute budget | 1553 heartbeat, 1559 one deposit, 1562 two deposits (about 3 per extra deposit) |
+| Kaspa fee per mint | ~0.33 KAS, plus 1 KAS carried by each minted token output |
+| GPU per proof | $0.05 to $0.11 rented; a weekly heartbeat ~$0.25 |
+| throughput | up to 4 deposits per proof, one proof per Ethereum finality update |
+
+## Repository
 
 | path | what |
 |---|---|
-| `fixtures/` | proof vectors copied verbatim from `rusty-kaspa/crypto/txscript/src/zk_precompiles/tests/` (commit 90dbf07, v2.0.0). One Groth16/BN254 proof (with VK and 5 public inputs) and one RISC Zero Succinct receipt. These are the vectors kaspad's own unit tests verify. |
-| `src/zk-scripts.js` | builds the exact redeem / unlock scripts the engine expects, via the SDK's native `ScriptBuilder` with `covenantsEnabled` |
-| `src/cost.js` | script-unit and mass model transcribed from `tags.rs`, `groth16/mod.rs`, `mass/units.rs`, `mass/mod.rs`, `params.rs` |
-| `src/tx.js` | transaction v1 construction with `computeBudget`; plan (budget, masses, min fee) |
-| `test/` | 31 `node:test` cases: script shape, cost constants vs the Rust tests, tx v1, mutation vectors |
-| `bin/address.mjs` | prints the covenant addresses to fund and the spend plan |
-| `bin/live.mjs` | the actual on-chain test: bad proof rejected, good proof accepted |
+| [`eth-prover/`](eth-prover) | the RISC Zero program (guest) and its host CLI: fetch, prove, wrap, decode; the Docker image |
+| [`bridge/`](bridge) | the Kaspa covenant (`bridge.sil`), the KCC-20 token (`kcc20.sil`), the Rust tool that builds every transaction and runs it through the 2.1.0 engine, the mainnet record |
+| [`vault/`](vault) | `Vault.sol` and the test token, Foundry project, storage layout |
+| [`bin/`](bin) | `bridge-prover.mjs` (the prover service), `bridge.mjs` (deploy, advance, transfer), helpers |
+| [`deployments/`](deployments) | the mainnet instances: covenant ids, parameters, every transaction |
+| `eth-prover/out-*/` | proof bundles of every mainnet advance, with the inputs to re-prove them |
+| [`docs/`](docs) | internal pages: the Kaspa ZK precompile test suite this project grew out of, the engineering handoff |
+| `src/`, `test/`, `fixtures/`, `prover/`, `vendor/` | the precompile test suite and its fixtures, a toy RISC Zero program, the Kaspa WASM SDK 2.1.0 |
 
-## Run
+## Roadmap
 
-### 3. Your own program: the melody covenant
+1. **USDC instance**: a new capped vault and a new covenant whose token has a burn entry from day
+   one, so that burns are recorded on Kaspa in a form a future Ethereum-side proof can read.
+2. **Redemption**: a proof of Kaspa consensus verifiable on Ethereum. Research first: what must be
+   proven, at what cost, at what depth.
+3. **Gloas support** before Ethereum's Glamsterdam fork reaches mainnet.
 
-Needs an x86_64 Linux box with Docker (the STARK-to-Groth16 step runs in risc0's docker image)
-and the risc0 toolchain at the version the Kaspa SDK pins:
+## Credits
 
-```
-curl -L https://risczero.com/install | bash && rzup install        # installs cargo-risczero, r0vm, rust toolchain
-rzup install r0vm 3.0.4                                            # must match risc0-zkvm = 3.0.4
-cd prover
-RISC0_DEV_MODE=1 cargo run --release -- --melody 60,62,64,65,67,69,71,72 --root 0 --mode major   # logic dry run
-cargo run --release -- --melody 60,62,64,65,67,69,71,72 --root 0 --mode major --out out       # real Groth16 receipt
-cd ..
-node bin/r0spend.mjs address --bundle prover/out                   # covenant address for YOUR program
-# fund it with ~0.4 KAS, then:
-node bin/r0spend.mjs spend --bundle prover/out --to kaspa:q... --url ws://127.0.0.1:17110 --decode
-```
-
-`spend` first submits the genuine proof with the journal hash's first byte flipped (a valid proof
-for the wrong public input, so the pairing check itself fails: `VerificationFailed`, the other
-failure mode from `live.mjs`), then the genuine spend, walking the budget up from 1550 on free
-rejections if the SDK's claim-reconstruction script costs more than the raw fixture did.
-
-Try a melody with a wrong note (`--melody 60,61,72`): the guest panics, no receipt, nothing to spend.
-Try one that does not end on the tonic (`--melody 60,62,64`): same.
-
-The bundle format (`image_id.hex`, `journal.hex`, `journal_hash.hex`, `receipt.hex`) is the contract
-between any prover and `r0spend.mjs`; `fixtures/r0-example/` is the SDK's own receipt in that format,
-useful to test the chain side before the Rust side builds.
-
-### 1 and 2. Fixture proof, and measuring the budget
-
-```
-npm test                      # 31 tests, offline, < 1 s
-node bin/address.mjs          # addresses + budget + fee
-```
-
-### Live test on testnet-10
-
-1. Get testnet KAS (faucet or your own TN10 wallet). About 1.5 TKAS covers the Groth16 run.
-2. Send it to the Groth16 covenant address printed by `bin/address.mjs`:
-   `kaspatest:ppnsz9gete7gqg7lcez3dm4gnk6pusrucpplywwv0sdf4gs44z5pqf9kxarug`
-3. Run, with an address of yours as destination:
-
-```
-node bin/live.mjs --to kaspatest:qq...            # public resolver
-node bin/live.mjs --to kaspatest:qq... --url ws://127.0.0.1:17210   # your node (wRPC Borsh)
-```
-
-Expected output, in order:
-
-```
-[1/2] submitting spend with corrupted proof byte 0 ...
-  rejected as expected:
-    ... ZkIntegrity ... (verification failed)
-[2/2] submitting spend with the genuine proof ...
-  accepted: txid <64 hex>
-  confirmed: output now in UTXO set of kaspatest:qq...
-```
-
-Both submissions spend the same UTXO. The first one fails script validation at the node's
-mempool, so the UTXO is still there for the second. Nothing is signed with a private key at
-any point; the signature script is the proof, the public inputs, and the redeem script.
-
-`--fixture succinct` runs the RISC Zero Succinct variant (222 KB signature script, ~0.5 TKAS
-min fee, ~90% of a block's transient mass).
-
-## Stack contract (from the engine, v2.0.0)
-
-`OpZkPrecompile` pops a tag byte, then by tag (top of stack first):
-
-```
-0x20 Groth16        vk | proof | n_inputs (i64) | input[0] ... input[n-1]        (BN254, arkworks compressed; Fr LE 32 bytes)
-0x21 R0 Succinct    hashfn | control_id | image_id | journal | seal | control_digests | control_index | claim
-```
-
-P2SH split used here (same as rusty-kaspa's test helpers):
-
-```
-Groth16   redeem = push(vk) push(0x20) OpZkPrecompile
-          unlock = push(input[n-1]) .. push(input[0]) push_i64(n) push(proof)
-Succinct  redeem = push(image_id) push(control_id) push(hashfn) push(0x21) OpZkPrecompile
-          unlock = push(claim) push(control_index) push(control_digests) push(seal) push(journal)
-```
-
-The redeem script is what the covenant trusts (the program). The unlock is what the spender
-supplies (the proof). A proof for a different program is a proof for a different address.
-
-Note: the v2.0.0 SDK's bundled `zkproof/risc0-succinct.js` example pushed the Succinct fields in a
-different order than the engine pops them; v2.1.0 replaced those examples. This suite follows the
-Rust test helpers that ship in the same commit as the consensus code.
-
-## The 2.1.0 way: `ZkScriptBuilder`
-
-v2.1.0 adds a RISC Zero-aware builder to the SDK, which is the primitive a bridge covenant wants:
-
-```
-commitToGroth16(imageId)                           // redeem: RISC Zero's fixed Groth16 VK + in-script claim reconstruction + precompile
-finalizeWithGroth16Proof(receipt, journalHash)     // unlock: receipt -> compressed proof push
-commitToSuccinct(imageId, controlId, hashFn?)      // redeem for Succinct receipts
-finalizeWithSuccinctProof(receipt, journal)        // unlock for Succinct receipts
-```
-
-The covenant pins the *program* (image id); the spender supplies the journal and the proof. See
-`examples/nodejs/javascript/zkproof/groth16_split.js` in the v2.1.0 SDK zip. This suite uses the
-raw `ScriptBuilder` layout on purpose, so the stack contract is visible; for the bridge, use
-`ZkScriptBuilder`.
-
-## Numbers that matter (v2.0.0, mainnet and testnet-10 identical)
-
-| | Groth16 (0x20) | RISC Zero Succinct (0x21) |
-|---|---|---|
-| precompile cost | 140,000 grams + 2,500 grams per public input (+1) | 250,000 grams |
-| proof size | 128 B proof + 424 B VK | 222,668 B seal |
-| compute budget (fixture, 5% margin) | 1627 | 2625 |
-| compute mass of spend | ~164k grams | ~486k grams |
-| transient mass of spend | ~3.7k grams | ~893k grams (block limit 1,000,000) |
-| min relay fee (100 sompi/gram, on max(compute, transient/2)) | ~0.164 KAS | ~0.49 KAS |
-| verifies per block (compute limit 500k) | 3 | 2 |
-
-Budget math: an input with `compute_budget = b` may use `b * 10_000 + 9_999` script units and
-costs `b * 100` grams of compute mass. Literal data pushes are free. Post-Toccata limits:
-signature script 250,000 B, script element 1,000,000 B, script 1,000,000 B.
-
-Design consequence: Groth16 is the production path. A RISC Zero guest can still be the prover;
-wrap its receipt with RISC Zero's Groth16 wrapper and the 5 public inputs land in exactly the
-shape of the Groth16 fixture here (control root ×2, claim digest ×2, BN254 control id).
-
-## Known gaps
-
-- The SDK's `calculateTransactionMass()` does not model v1 compute budgets
-  (`wallet/core/src/tx/mass.rs`: "TODO: Add support for v1 transactions"). `src/cost.js`
-  computes consensus masses instead; the node's actual metering is the final word.
-- The compute budget is an estimate with 5% margin over the engine's documented charges.
-  If the node answers `ExceededCommittedScriptUnits { used, limit }`, raise `--fee-mult` or the
-  margin in `planZkSpend`; `used` tells you the exact number for next time.
-- No local script execution: the SDK does not expose the engine. The node is the verifier.
+Built by [Kaspero Labs](https://github.com/kasperolabs) with Claude. Standing on:
+[RISC Zero](https://github.com/risc0/risc0) and [r0vm-helios](https://github.com/risc0/r0vm-helios)
+(audited by zkSecurity), [Helios](https://github.com/a16z/helios) by a16z,
+[rusty-kaspa](https://github.com/kaspanet/rusty-kaspa) and its ZK precompile (Toccata),
+[Silverscript](https://github.com/kaspanet/silverscript).
