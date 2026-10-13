@@ -8,15 +8,17 @@ import { groth16RedeemScript, groth16SignatureScript, succinctRedeemScript, succ
 import { planZkSpend } from '../src/tx.js';
 
 const network = process.argv[2] ?? 'testnet-10';
-const DUMMY_P2PK = '20' + '00'.repeat(32) + 'ac';
+// Placeholder recipient used only to size the spend (mass depends on script length, not the key).
+// All-zero key: never a valid recipient; nothing here is ever submitted.
+const SIZING_P2PK = '20' + '00'.repeat(32) + 'ac';
 
 const g = loadGroth16();
 const gRedeem = groth16RedeemScript(g.vk);
-const gPlan = planZkSpend({ tag: 0x20, nInputs: g.inputs.length, redeemHex: gRedeem, signatureScriptHex: groth16SignatureScript(g), toScriptHex: DUMMY_P2PK });
+const gPlan = planZkSpend({ tag: 0x20, nInputs: g.inputs.length, redeemHex: gRedeem, signatureScriptHex: groth16SignatureScript(g), toScriptHex: SIZING_P2PK });
 
 const s = loadSuccinct();
 const sRedeem = succinctRedeemScript(s);
-const sPlan = planZkSpend({ tag: 0x21, redeemHex: sRedeem, signatureScriptHex: succinctSignatureScript(s), toScriptHex: DUMMY_P2PK });
+const sPlan = planZkSpend({ tag: 0x21, redeemHex: sRedeem, signatureScriptHex: succinctSignatureScript(s), toScriptHex: SIZING_P2PK });
 
 const kas = (sompi) => (Number(sompi) / 1e8).toFixed(8);
 

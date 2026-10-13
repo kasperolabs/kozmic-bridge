@@ -1,13 +1,16 @@
 {
-  "name": "kaspa-zk-tests",
-  "version": "0.1.0",
+  "name": "kozmic-bridge",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Node.js test suite for OpZkPrecompile (Groth16 / RISC Zero Succinct) covenant spends on Kaspa post-Toccata. No npm dependencies; uses the vendored v2.0.0 WASM SDK.",
+  "description": "Kozmic: Kaspa L1 reads Ethereum. A trustless bridge from Ethereum to Kaspa, proven with RISC Zero and minted as KCC-20 by a Silverscript covenant. Uses the vendored Kaspa WASM SDK 2.1.0.",
+  "license": "MIT",
   "engines": { "node": ">=20" },
   "optionalDependencies": { "websocket": "^1.0.35" },
   "scripts": {
     "test": "node --test \"test/**/*.test.js\"",
+    "prover": "node bin/bridge-prover.mjs",
+    "bridge": "node bin/bridge.mjs",
     "address": "node bin/address.mjs",
     "live": "node bin/live.mjs"
   }

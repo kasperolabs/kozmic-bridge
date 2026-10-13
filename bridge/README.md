@@ -1,13 +1,17 @@
-# BRIDGE covenant (CP-4 to CP-7)
+# The bridge covenant
 
 A Silverscript covenant that holds an Ethereum light-client state on Kaspa L1, advances it only
 on a RISC Zero Groth16 proof (tag 0x20) from the pinned guest program, and mints a KCC-20 token
 for every Vault.sol deposit the proof carries. Sources: `bridge.sil` (the bridge) and `kcc20.sil`
 (the token, a verbatim copy of silverscript's `tests/examples/kcc20.sil` at the pinned rev).
-Driver: `../bin/bridge.mjs`. Prover service: `../bin/bridge-prover.mjs` (CP-7, runs the whole loop
-with no human step). This crate compiles both contracts, assembles the complete init / mint /
+Driver: `../bin/bridge.mjs`. Prover service: `../bin/bridge-prover.mjs` (runs the whole loop with
+no human step). This crate compiles both contracts, assembles the complete init / mint /
 transfer transactions and runs every input through the rusty-kaspa 2.1.0 script engine before the
 driver submits anything.
+
+Comments in `bridge.sil` mention internal checkpoint labels (CP-4 to CP-6) from the build plan.
+They stay as they are: the live covenant's redeem script was compiled from this exact file, and the
+source is kept byte-identical to what was deployed.
 
 ## Verifier: native builtin, which is the SDK fragment
 
@@ -121,11 +125,12 @@ init sigscript 6844 bytes (carries the token template), token redeem 2662 bytes.
 
 ## Mainnet record
 
-### CP-4/CP-5 test instance (consensus-spec chain)
+### Test instance (consensus-spec chain, retired)
 
 Covenant id `4e97879a4fe9fee3814ccd1576ef9743fa511a42abd6eff4580abd66140c42a7`, pinned to the
 minimal-spec guest `d7c73376…` and the test chain's commitment `aa4a6036…`. Its state file is
-`bridge-state.json`; it is left as the CP-4/5 record. Retired: it does not reflect Ethereum mainnet.
+`bridge-state.json`; it is kept as the record of the first light-client transitions. It does not reflect Ethereum mainnet
+and never mints.
 
 | what | txid / result |
 |---|---|
@@ -135,7 +140,7 @@ minimal-spec guest `d7c73376…` and the test chain's commitment `aa4a6036…`. 
 | transition 2, fixture step 1 (sync-committee rotation), budget 1551 | `d5fd63b5933952fd2ffd629d7806a4ac659bb03328e117d8c94ae8df52f8ca52` |
 | replay of step 0 after transition 2 | rejected (`f81cfb8d…`) |
 
-### CP-6 production instance (Ethereum mainnet, KBT)
+### Production instance (Ethereum mainnet, KBT)
 
 Deployed 2026-10-12, 20:52 to 20:58 UTC, from the state fetched at the old checkpoint_out
 `0xa63ca480…` (slot 15,417,408, period 1882) and a fresh proof carrying deposits #1 and #2
@@ -158,7 +163,7 @@ Deployed 2026-10-12, 20:52 to 20:58 UTC, from the state fetched at the old check
 | replay of the same bundle after the advance (state header `0x6dc6c279…`, cursor 2) | rejected: `script ran, but verification failed` (tx `f6d8f759…`, never accepted) |
 | wallet-side transfer: the 1 KBT UTXO `e108d416…:2` (owner = the genesis key) -> 0.4 KBT to `kaspa:qpdlx5…` + 0.6 KBT change, signed with that key, budget 12 (node used=121,428; local 129,572), 1x fee: storage mass 147,730 g, fee 0.1477 KAS, each token output 0.426 KAS | `6cf4a2afa5e732473d532cf6d34ec22f5e9f991d4344ad4c5810bc722debdf33` |
 
-### CP-7: the prover service on the same instance (no human step)
+### The prover service on the same instance (no human step)
 
 `bin/bridge-prover.mjs` under pm2 on the node box: polls the light-client finality update
 (publicnode, then Lodestar) and the vault nonce at its execution block, and when a deposit is
@@ -171,7 +176,7 @@ box and calls `bridge.mjs advance`. It holds no Kaspa or Ethereum key.
 | first automated advance, 2026-10-13 00:24 to 00:33 UTC (`--once --force heartbeat`): re-proves deposit #2, mints nothing. `0x6dc6c279… -> 0x63d72f9f…` (slot 15,418,848), no rotation, 57.9M cycles. Pod RTX 4090: IP 301 s, prove 117 s, deleted at 427 s ($0.106); wrap 73 s; advance 30 s. **Node budget 1553** (= local), fee 0.321 KAS at 2x | `e7fc633a760c9f7731dec8dd799f772bb046e7aede858b6c81fdb80e93fcd5e1` |
 | **deposit #3 bridged with no human step.** Ethereum: 0.5 KBT to `kaspa:qpdlx5…`, tx `0x29e6f6a874164b38c556abd32dbcfb3adc262e06238b46bfb8f3ce4107a419b0`, block 26,180,018, 00:35:23 UTC, made with the service running and nothing else done. The service started at 00:49:24 on the first finality update covering it (exec block 26,180,019, lag 13.8 min): 54.9M cycles, no rotation; GPU fallback L40S ($1.09/h): IP 58 s, prove 103 s, deleted at 164 s ($0.050); wrap 71 s; advance 30 s; cycle 268 s. `0x63d72f9f… -> 0x0d3f1e43…`, cursor 2 -> 3. **Node budgets 1559 (bridge, 1 deposit) and 3 (minter branch, 2 token outputs)**; fee 0.3305 KAS at 2x plus 1 KAS into the token UTXO. **Deposit block to mint: 18 min 29 s** | `568bedc542e6ed51ce6ecbbef0968a730d43b049f95150d37960ca7a86f44aaf` |
 
-Live after CP-7: bridge UTXO `568bedc5…:0` (14.935652 KAS, state header `0x0d3f1e43…`,
+Live after deposit #3: bridge UTXO `568bedc5…:0` (14.935652 KAS, state header `0x0d3f1e43…`,
 committee `0xc68d24d7…`, cursor 3); minter branch `568bedc5…:1` (1 KAS); token UTXOs
 `e108d416…:3` (2.5 KBT, Oz's Kasla key), `6cf4a2af…:0` (0.4 KBT, same key), `6cf4a2af…:1` (0.6 KBT,
 genesis key), `568bedc5…:2` (0.5 KBT, Kasla key). Vault on Ethereum holds 4.0 KBT from 3 deposits;
@@ -205,7 +210,7 @@ history). The Rust tool (`bridge-covenant script|journal|token-script|init|advan
 prints the complete transaction and the engine verdict as JSON; compute budgets are not part of
 the v1 sighash, so the driver walks them up without re-signing.
 
-### The prover service (CP-7)
+### The prover service
 
 Needs, in the repo root: `eth-rpc-url.txt` (execution RPC with `eth_getProof`), Docker (for the
 wrap), the node-box build of `eth-prover`, a Kaspa node's wRPC (Borsh) port, and a GPU mode:

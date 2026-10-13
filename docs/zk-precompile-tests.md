@@ -1,3 +1,5 @@
+> Internal page: the Kaspa ZK precompile test suite this project grew out of (v1.0, 2026-10-11). Some statements here predate the bridge; the top-level README is current.
+
 # kaspa-zk-tests  (v1.0)
 
 ZK-opened UTXOs on Kaspa L1 after the Toccata hard fork (mainnet since 2026-06-30).
