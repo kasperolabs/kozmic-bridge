@@ -15,7 +15,10 @@ by independent models and tested on a mainnet fork against the real RISC Zero ro
 every transaction through the real rusty-kaspa 2.1.0 engine before it is sent; the guests are built on
 RISC Zero's audited r0vm-helios. **No paid audit has been done.** Left: the cap is the damage bound.
 If a flaw is found, deposits are closed (the one thing the operator can do) and holders exit through
-the still-working side; funds taken through a flaw cannot be returned.
+the still-working side; funds taken through a flaw cannot be returned. The cap bounds what is in the
+vault at any one time, not what can be lost over the instance's life: a flaw exploited repeatedly while
+deposits keep refilling the vault can take more than one cap's worth, which is why closing deposits is
+the first response to any sign of one.
 
 ## 2. Forged Kaspa history (the outbound proof)
 
@@ -79,15 +82,19 @@ watch; the page's exit table shows the expected wait before you sign.
 
 Circle can blacklist addresses, including the vault. A blacklisted vault cannot pay exits; `kzUSDC`
 would then be claims on frozen USDC. `docs/USDC-BLACKLIST-STUDY.md` measures how often this happens
-and to whom. The inbound guest proves that a depositor is not blacklisted at deposit time; the page
-checks a recipient before a burn is signed. Left: a freeze of the vault is a total loss for holders who
-have not exited, and nothing in this system can prevent it.
+and to whom. The inbound guest proves each depositor's blacklist status at the finalized state the proof carries
+(at or after the deposit; a blacklisted depositor's deposit is skipped, not minted); the page checks a
+recipient before a burn is signed. A recipient blacklisted *after* the burn cannot be paid: the vault's
+transfer fails, the debt stays recorded to that address, and there is no way to redirect it. Left: a
+freeze of the vault is a total loss for holders who have not exited, a freeze of a recipient is a loss of
+that exit, and nothing in this system can prevent either.
 
 ## 10. Caps and buckets
 
 The vault refuses deposits above its cap, and the relay pays at most a fixed amount per proof and per
-day across everyone. On a busy day an exit may arrive in parts over more than a day. Nothing is lost;
-it is slower.
+day across everyone. On a busy day an exit may arrive in parts over more than a day (anyone can call
+`claim(txId)` for the next installment). Nothing is lost; it is slower. The cap is a limit on what the
+vault holds at any moment, not a lifetime total (item 1).
 
 ## 11. Ethereum or Kaspa changes
 
@@ -123,12 +130,23 @@ or a private key.
 ## 15. The user's own mistakes
 
 The Kaspa address given at deposit and the Ethereum account connected at burn are final. A burn below
-`MIN_BURN` is lost. A burn of a cell larger than the vault's remaining liquidity waits. One exit uses
-one coin, so a wallet holding many small cells can send at most its largest at once. The guide
+`MIN_BURN` is lost, and so is a burn whose payload names the zero address (the page never builds one; a
+hand-built burn can). A burn larger than the daily bucket is paid in installments. One exit uses one
+coin, so a wallet holding many small cells can send at most its largest at once. The guide
 (`docs/GUIDE.md`) says all of this before you sign; the page repeats it.
 
 ## 16. What the operator holds
 
-Kaspero holds: the fee address on Ethereum (where exit fees accumulate), the robot keys (which pay gas
-and Kaspa fees and receive tips), the web page and its domain, and the close preimage that lets it
-stop new deposits. None of these can move a user's funds, redirect an exit, or mint.
+Kaspero holds: the fee address on Ethereum (where exit fees accumulate, and where a tip goes when the
+prover's own address cannot receive it), the robot keys (which pay gas and Kaspa fees and receive tips),
+the web page and its domain, and the close preimage that lets it stop new deposits. None of these can
+move a user's funds, redirect an exit, or mint.
+
+The covenant's KAS pool is also operator money with a known leak: `advance` takes no signature and the
+covenant lets the successor keep `input - max_fee - cell floors`, so whoever advances it with a valid
+proof may pay the gap between `max_fee` and the real network fee to an output of their own. `max_fee` is
+set tight at genesis, the gap is worth far less than the proof that earns it, and the pool holds tens of
+KAS; if it ever ran dry, advances would stop until it is refilled, and no user funds move. The same
+permissionless `init` left the third genesis output's script unpinned, so a stranger who had won the
+race to `init` could have redirected the miner endowment; the live instance's `init` is on chain with the
+intended drip, and the next covenant generation pins it.

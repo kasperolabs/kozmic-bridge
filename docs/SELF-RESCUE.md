@@ -60,8 +60,10 @@ Revert reasons you may see:
 | `history window` or `not Ethereum's block` | the burn's Ethereum clock is older than about 27 hours | a rescue burn is needed, below |
 | `no prover` / `not this relay` / `not this token` | wrong RELAY, TOKEN or PROVER | fix the environment |
 
-After a successful `submit`, the recipient has been paid (less the fee). Your tip is recorded; claim
-it any time with `cast send <relay> 'claim()'` from the PROVER account.
+After a successful `submit`, the recipient has been paid the first installment (less the fee) and your
+tip share with it; both continue with each later installment. If an installment was deferred (bucket
+empty), anyone can trigger the next one with `cast send <relay> 'claim(bytes32)' 0x<burn txid>`; the
+tip of each installment goes to the PROVER address inside the journal, whoever calls.
 
 **Rescue burn.** Every burn's payload names a recent Ethereum block as its clock, and the relay can
 only check clocks Ethereum still remembers (EIP-2935, about 27 hours). A burn whose proof did not land
@@ -74,32 +76,33 @@ burns older than 22 hours; by hand, make the fresh burn from the bridge page or 
 ## Ethereum to Kaspa: `bin/prove-deposit.sh`
 
 A deposit has been final on Ethereum for an hour and nothing was minted. You need the vault's deposit
-nonces to mint (the page shows them; `cast call <vault> 'depositCount()(uint64)'` gives the latest),
-the instance's current **state file** and its **light-client store**.
+nonces to mint (the page shows them; `cast call <vault> 'nonce()(uint64)'` gives the latest), the
+instance's current **state file** and its **light-client store**. You need no KAS and no Kaspa key: the
+covenant's own pool pays the advance.
 
 The state file (`bridge-<instance>-state.json`) holds the covenant's current outpoint, Ethereum header,
 sync-committee hash and deposit cursor; the store holds the light-client state for that header, one
 file per finalized root. Both are public, deterministic data. No beacon node serves a bootstrap for a
 post-Gloas header, so without the store file for the covenant's current header the fetch cannot start.
-Kaspero publishes both for the live instance next to the bridge page; at the time of this export that
-publication is being set up (RISKS.md, item 5) and the files are available on request.
+Kaspero will publish both for the live instance next to the bridge page; at the time of this export
+that publication is an open item (RISKS.md, item 5) and the files are available on request.
 
 ```
 ETH_RPC_FILE=eth-rpc-url.txt BEACON=https://ethereum-beacon-api.publicnode.com \
 VAULT=0x1B9f6750d8b9776Ed9128DC48A7537019ecB2243 TOKEN=0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 \
 STATE=bridge-kzusdc-state.json STORE=eth-prover/stores/mainnet-kzusdc \
-KASPA_URL=ws://127.0.0.1:17110 KAS_KEY=kas-key.json NONCES="14 15" \
-ETH_PROVER_IMAGE=<the digest-pinned kasperolabs/eth-prover image; see eth-prover/README.md> \
+KASPA_URL=ws://127.0.0.1:17110 NONCES="14 15" \
+ETH_PROVER_IMAGE=<the digest-pinned kasperolabs/eth-prover image named in README.md> \
 bash bin/prove-deposit.sh
 ```
 
-What it does: reads the covenant's header from the state file; `eth-prover fetch` pulls the finality
-updates from the header to the latest finalized one and the storage proofs of the requested deposits
-(a blacklisted depositor or a wrong nonce is reported here, before any proving); dev-mode execute;
-GPU prove in the pinned image; wrap; then `bridge-v5.mjs advance` builds the Kaspa transaction, runs it
-through the real 2.1.0 script engine, and sends it. The Kaspa fees (about 0.5 KAS per advance plus
-1 KAS parked in each minted cell) come from `KAS_KEY`, a key file made with
-`node bin/bridge-v5.mjs key --key kas-key.json` and funded with a few KAS.
+What it does: reads the covenant's header from the state file and the pinned image id from the
+deployment record; `eth-prover fetch` (with the Gloas epoch from `eth-net.json`, which is part of the
+chain commitment) pulls the finality updates from the header to the latest finalized one and the storage
+proofs of the requested deposits (a blacklisted depositor or a wrong nonce is reported here, before any
+proving); dev-mode execute; GPU prove in the pinned image; wrap; then `bridge-v5.mjs advance` builds
+the Kaspa transaction, runs it through the real 2.1.0 script engine, and sends it. The network fee and the
+KAS parked in each minted cell come out of the covenant's pool, as the covenant's rules allow.
 
 If two provers advance the same covenant from the same state, the second sees `input not found`: the
 covenant moved. Refresh the state file (`node bin/bridge-v5.mjs state --help`) and prove again from the

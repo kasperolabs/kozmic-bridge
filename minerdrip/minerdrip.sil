@@ -1,0 +1,28 @@
+// Compiled on silverc v1 (kaspanet/silverscript 3ed9733); claim and reveal spent on Kaspa mainnet Oct 10-11, 2026 (reveal b33fb379..., claim c1d8710e...). Same source as the Studio's routes/kcc20-endow.js.
+pragma silverscript ^0.1.0;
+
+// MinerDrip: an endowment for Kaspa miners. No owner, no key, no reclaim.
+// Once every `period` DAA score, anyone may release a prize as the transaction fee.
+// tokenId is the KCC-20 covenant ID this endowment belongs to. The claim does not depend on it; it is a constant in
+// the script, so the script (and so the address) is unique to the token and names it.
+// reveal() runs once, right after launch: it puts this script on chain (the stamp with it) and pays the first miner minPrize.
+contract MinerDrip(int period, int divisor, int minPrize, byte[32] tokenId, int endowment) {
+    entry claim() {
+        require(tokenId == tokenId);                           // the stamp: keeps the constant in the script
+        require(this.ageDaa >= period);
+        int balance = tx.inputs[this.activeInputIndex].value;
+        int prize = balance / divisor;
+        if (prize < minPrize) { prize = minPrize; }
+        require(balance - prize >= minPrize);                 // the last sliver stays (under 2 x minPrize)
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].scriptPubKey == tx.inputs[this.activeInputIndex].scriptPubKey);
+        require(tx.outputs[0].value == balance - prize);      // nowhere else to go: the prize is the fee
+    }
+    entry reveal() {
+        int balance = tx.inputs[this.activeInputIndex].value;
+        require(balance >= endowment);                         // only the untouched endowment: once
+        require(tx.outputs.length == 1);
+        require(tx.outputs[0].scriptPubKey == tx.inputs[this.activeInputIndex].scriptPubKey);
+        require(tx.outputs[0].value == balance - minPrize);   // the first drip, paid at launch
+    }
+}

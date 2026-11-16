@@ -5,8 +5,10 @@ Parameters
 Licensor:             Kaspero Labs
 
 Licensed Work:        Kozmic Bridge, the Kaspa L1 <-> Ethereum zero-knowledge bridge: its Solidity
-                      contracts, RISC Zero guest programs and hosts, Silverscript covenants, Rust
-                      crates, scripts and documentation in this repository.
+                      contracts, the outbound RISC Zero guest and host (outbound/), the Silverscript
+                      covenants and their Rust crate (bridge-v7/), the scripts and documentation in
+                      this repository, except the directory eth-prover/, which is licensed under the
+                      MIT License (see eth-prover/LICENSE) and is not part of the Licensed Work.
                       The Licensed Work is (c) 2026 Kaspero Labs.
 
 Additional Use Grant: You may use the Licensed Work in production solely to:
@@ -31,9 +33,9 @@ Earlier versions: the one-way bridge published in this repository through commit
 (2026-10-14) was released under the MIT License and remains available under it from that
 history. This License applies to the Licensed Work from the first commit that carries it.
 
-Third-party notices: eth-prover/ derives from RISC Zero's r0vm-helios and Succinct's sp1-helios (both
-MIT; their notices are kept in eth-prover/LICENSE). vendor/kaspa is the rusty-kaspa WASM SDK 2.1.0
-(ISC). Those parts remain under their own licenses.
+Third-party notices: eth-prover/ (MIT, as above) derives from RISC Zero's r0vm-helios and Succinct's
+sp1-helios, both MIT; their notices are kept in eth-prover/LICENSE. vendor/kaspa is the rusty-kaspa
+WASM SDK 2.1.0 (ISC). Those parts remain under their own licenses.
 
 Notice
 
