@@ -1,0 +1,74 @@
+# kaspa-prover GPU image (O2): STARK proving of the relay guest on the GPU; the Groth16 wrap runs on a CPU box.
+# Same layout, base images and toolchain as eth-prover/docker/Dockerfile.cuda, so the pinned toolchain is one.
+#
+# Build (x86_64 box with Docker, no GPU needed; BuildKit cache mounts make rebuilds after a source change take
+# minutes instead of the ~30 min first build):
+#   cd outbound/kaspa-prover && docker build -f docker/Dockerfile.cuda -t kasperolabs/kaspa-prover:cuda .
+#
+# Reproduce the image ids WITHOUT a GPU (writes IMAGE_IDS.txt into the current directory):
+#   docker build -f docker/Dockerfile.cuda --target ids --output type=local,dest=. .
+#   cat IMAGE_IDS.txt     # the relay guest line is the id the Ethereum relay contract pins (README, O2)
+# The ids stage reuses the build stage below unchanged, so the program it hashes is the same artifact the GPU
+# image carries; only the host binary is rebuilt without CUDA so it can run on a machine with no driver.
+#
+# Run on a rented GPU pod: the container starts sshd if $PUBLIC_KEY is set (Runpod convention) and idles;
+# bin/relay-prove.mjs does the rest. The CUDA Groth16 wrap is not used (see eth-prover: it dies with an illegal
+# memory access on the tested boxes); the flow is `prove --no-wrap` on the GPU, then `wrap` on a box with Docker.
+#
+# Kernels are built for sm_80, sm_86, sm_89, sm_90 plus PTX for newer cards.
+
+# ---------- build stage ----------
+FROM nvidia/cuda:12.6.3-devel-ubuntu22.04 AS build
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential pkg-config libssl-dev curl git ca-certificates xz-utils \
+        protobuf-compiler clang libclang-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Host Rust (stable)
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo PATH=/usr/local/cargo/bin:/usr/local/cuda/bin:$PATH
+RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+
+# RISC Zero: guest Rust toolchain 1.94.1, r0vm 3.0.4, native Groth16 parameters (same pins as eth-prover).
+RUN curl -L https://risczero.com/install | bash \
+    && /root/.risc0/bin/rzup install rust 1.94.1 \
+    && /root/.risc0/bin/rzup install r0vm 3.0.4 \
+    && /root/.risc0/bin/rzup install risc0-groth16
+ENV PATH=/root/.risc0/bin:$PATH
+
+# No GPU in the build container: name the target arch instead of letting risc0 use -arch=native.
+ENV NVCC_APPEND_FLAGS="-gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_89,code=sm_89 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_90,code=compute_90"
+
+WORKDIR /src
+COPY . .
+# Cache mounts: registry, git checkouts and target dir persist across builds (needs BuildKit, the default).
+# The binary is copied out of the cache mount because cache contents are not part of the image layer.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/src/target \
+    cargo build --release --features cuda -p kaspa-prover-host \
+    && cp target/release/kaspa-prover /kaspa-prover
+
+# ---------- ids: the image ids, printable without a GPU ----------
+FROM build AS ids-run
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/src/target \
+    cargo build --release -p kaspa-prover-host \
+    && ./target/release/kaspa-prover ids | tee /IMAGE_IDS.txt
+
+FROM scratch AS ids
+COPY --from=ids-run /IMAGE_IDS.txt /IMAGE_IDS.txt
+
+# ---------- runtime stage (the GPU image; the default target) ----------
+FROM nvidia/cuda:12.6.3-runtime-ubuntu22.04
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates libssl3 git curl openssh-server \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /run/sshd /root/.ssh && chmod 700 /root/.ssh
+COPY --from=build /kaspa-prover /usr/local/bin/kaspa-prover
+COPY --from=build /root/.risc0 /root/.risc0
+COPY docker/pod-start.sh /usr/local/bin/pod-start.sh
+RUN chmod +x /usr/local/bin/pod-start.sh
+WORKDIR /work
+CMD ["/usr/local/bin/pod-start.sh"]

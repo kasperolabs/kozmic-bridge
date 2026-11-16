@@ -1,0 +1,2 @@
+eth-bridge-guest (mainnet spec) image id: c320da505b41ffb3336a5bd4d995ead15590b75f4cb4b1ae3fa25353bacb955c
+eth-bridge-guest-minimal          image id: e51a40d82591d9c73685d36880ab698d4d43eded719ecb11e91a0aa55c56bc1e

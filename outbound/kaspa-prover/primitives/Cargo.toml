@@ -1,0 +1,18 @@
+[package]
+name = "kaspa-prover-primitives"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+blake2b_simd = { version = "1.0", default-features = false }
+# keyed blake3 for the KIP-21 sequencing commitment and v1 transaction ids (pure Rust, no_std)
+blake3 = { version = "1", default-features = false }
+tiny-keccak = { version = "2.0", features = ["cshake"] }
+
+[dev-dependencies]
+hex = "0.4"
+
+[features]
+default = ["std"]
+std = ["blake2b_simd/std", "blake3/std"]

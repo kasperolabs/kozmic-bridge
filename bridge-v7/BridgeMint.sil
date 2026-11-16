@@ -1,0 +1,99 @@
+// Compiled on silverc a0dd744 (silverscript 1.0.1, rusty-kaspa 2.1.0 crates), 2026-10-16: template dc96afcd..., 1,473 B,
+// tags mint e3505180, retire dd5121ee. Executed in the rusty-kaspa 2.1.0 covenant engine (bridgemint_tests.rs: 1-4 recipient
+// mints, reference transfer of a minted cell, retire, 16 rejections) on 2026-10-16. Never spent on any network.
+pragma silverscript ^0.1.0;
+
+// BridgeMint: the mint authority of a KCC-20 Last Call token, as a sibling actor in the token's covenant family.
+// The token cells themselves are the unmodified reference KCC20 program (argent-lang/kcc20-reference c8a0871,
+// template 9703112e...). This program never runs on a token cell; it only creates them.
+//
+// Rules:
+//   mint:   the bridge's covenant id has an input in this tx; this cell is the only family input; it continues
+//           unchanged (same script, same KAS) as authorized output 0; authorized outputs 1..4 are new KCC20 cells,
+//           each amount > 0, owner scheme p2pk-schnorr (0x00) or p2sh (0x03), borrow disabled, this token's
+//           extension commitment. Nothing else is created in the family. Amounts and owners are NOT chosen here:
+//           the bridge's own script must check them against its proof.
+//   retire: the bridge's covenant id has an input in this tx; this cell is consumed with no continuation
+//           (ends minting for good, e.g. on migration to a new instance).
+contract BridgeMint(
+    byte[32] gen__init_kcc20_template,
+    byte[32] gen__init_bridge_mint_template,
+    byte[32] init_bridge_covenant_id,
+    byte[32] init_extension_commitment
+) {
+    byte constant OWNER_P2PK_SCHNORR = 0x00;
+    byte constant OWNER_P2SH = 0x03;
+    byte constant BORROW_DISABLED = 0x00;
+    int constant MAX_RECIPIENTS = 4;
+
+    struct KCC20State {
+        int amount;
+        byte[32] owner;
+        byte owner_scheme;
+        byte borrow_scheme;
+        byte[32] borrow_guard;
+        byte[32] extension_commitment;
+    }
+    struct Gen__KCC20State {
+        byte[32] gen__kcc20_template;
+        int amount;
+        byte[32] owner;
+        byte owner_scheme;
+        byte borrow_scheme;
+        byte[32] borrow_guard;
+        byte[32] extension_commitment;
+    }
+
+    byte[32] gen__kcc20_template = gen__init_kcc20_template;
+    byte[32] gen__bridge_mint_template = gen__init_bridge_mint_template;
+    byte[32] bridge_covenant_id = init_bridge_covenant_id;
+    byte[32] extension_commitment = init_extension_commitment;
+
+    entry mint(KCC20State[] recipients, byte[] gen__kcc20_prefix, byte[] gen__kcc20_suffix) {
+        byte[32] cov = OpInputCovenantId(this.activeInputIndex);
+        require(OpCovInputCount(cov) == 1);
+        require(OpCovInputCount(bridge_covenant_id) > 0);
+
+        int n = OpAuthOutputCount(this.activeInputIndex);
+        require(n >= 2);
+        require(n <= 5);
+        require(OpCovOutputCount(cov) == n);
+        require(recipients.length == n - 1);
+
+        // the authority continues unchanged
+        int a0 = OpAuthOutputIdx(this.activeInputIndex, 0);
+        require(tx.outputs[a0].value == tx.inputs[this.activeInputIndex].value);
+        require(tx.outputs[a0].scriptPubKey == tx.inputs[this.activeInputIndex].scriptPubKey);
+
+        for (i, 0, recipients.length, MAX_RECIPIENTS) {
+            require(recipients[i].amount > 0);
+            require(recipients[i].owner_scheme == OWNER_P2PK_SCHNORR || recipients[i].owner_scheme == OWNER_P2SH);
+            require(recipients[i].borrow_scheme == BORROW_DISABLED);
+            require(recipients[i].extension_commitment == extension_commitment);
+            Gen__KCC20State s = Gen__KCC20State {
+                gen__kcc20_template: gen__kcc20_template,
+                amount: recipients[i].amount,
+                owner: recipients[i].owner,
+                owner_scheme: recipients[i].owner_scheme,
+                borrow_scheme: recipients[i].borrow_scheme,
+                borrow_guard: recipients[i].borrow_guard,
+                extension_commitment: recipients[i].extension_commitment,
+            };
+            validateOutputStateWithTemplate(
+                OpAuthOutputIdx(this.activeInputIndex, i + 1),
+                s,
+                gen__kcc20_prefix,
+                gen__kcc20_suffix,
+                gen__kcc20_template
+            );
+        }
+    }
+
+    entry retire() {
+        byte[32] cov = OpInputCovenantId(this.activeInputIndex);
+        require(OpCovInputCount(cov) == 1);
+        require(OpCovInputCount(bridge_covenant_id) > 0);
+        require(OpAuthOutputCount(this.activeInputIndex) == 0);
+        require(OpCovOutputCount(cov) == 0);
+    }
+}

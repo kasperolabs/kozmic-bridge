@@ -1,0 +1,20 @@
+[package]
+name = "kaspa-header-guest"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = 3
+
+[dependencies]
+risc0-zkvm = { version = "=3.0.4", default-features = false, features = ["std", "unstable"] }
+kaspa-prover-primitives = { path = "../../primitives" }
+
+[patch.crates-io]
+# Same accelerated fork eth-prover pins; only its software `keccakf` is used here (the accelerated
+# path calls the zkVM directly), so this pin keeps the lock files of both guests in step.
+tiny-keccak = { git = "https://github.com/risc0/tiny-keccak", tag = "tiny-keccak/v2.0.2-risczero.0" }

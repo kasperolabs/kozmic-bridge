@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" font-family="Inter, 'DejaVu Sans', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="ar" markerWidth="12" markerHeight="12" refX="9" refY="6" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L12,6 L0,12 z" fill="#15594d"/>
+    </marker>
+    <marker id="arp" markerWidth="12" markerHeight="12" refX="9" refY="6" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L12,6 L0,12 z" fill="#4a56b8"/>
+    </marker>
+  </defs>
+  <rect width="1600" height="900" fill="#fbfaf6"/>
+
+  <text x="80" y="92" font-size="44" font-weight="600" fill="#15161a">How Ethereum checks Kaspa's work without reading its blocks</text>
+  <text x="80" y="130" font-size="22" fill="#5a5d66">One hour of Kaspa is ~36,000 blocks. The proof touches 65 to 2,200 of them and still measures the whole hour's hashrate.</text>
+
+  <!-- the DAG band: faint small blocks -->
+  <g>
+    <rect x="80" y="190" width="1440" height="130" rx="14" fill="#f1f1ee"/>
+    <text x="100" y="220" font-size="15" fill="#7a7d86">all blocks in the hour (9.9 per second, every one carries parents at every level)</text>
+    <g fill="#d8d9de">
+      <rect x="110" y="250" width="12" height="12" rx="2"/><rect x="128" y="262" width="12" height="12" rx="2"/><rect x="146" y="248" width="12" height="12" rx="2"/><rect x="164" y="270" width="12" height="12" rx="2"/><rect x="182" y="255" width="12" height="12" rx="2"/><rect x="200" y="266" width="12" height="12" rx="2"/><rect x="218" y="249" width="12" height="12" rx="2"/><rect x="236" y="272" width="12" height="12" rx="2"/><rect x="254" y="258" width="12" height="12" rx="2"/><rect x="272" y="247" width="12" height="12" rx="2"/><rect x="290" y="268" width="12" height="12" rx="2"/><rect x="308" y="253" width="12" height="12" rx="2"/><rect x="326" y="264" width="12" height="12" rx="2"/><rect x="344" y="250" width="12" height="12" rx="2"/><rect x="362" y="271" width="12" height="12" rx="2"/><rect x="380" y="257" width="12" height="12" rx="2"/><rect x="398" y="248" width="12" height="12" rx="2"/><rect x="416" y="266" width="12" height="12" rx="2"/><rect x="434" y="254" width="12" height="12" rx="2"/><rect x="452" y="270" width="12" height="12" rx="2"/><rect x="470" y="251" width="12" height="12" rx="2"/><rect x="488" y="263" width="12" height="12" rx="2"/><rect x="506" y="249" width="12" height="12" rx="2"/><rect x="524" y="268" width="12" height="12" rx="2"/><rect x="542" y="256" width="12" height="12" rx="2"/><rect x="560" y="272" width="12" height="12" rx="2"/><rect x="578" y="252" width="12" height="12" rx="2"/><rect x="596" y="261" width="12" height="12" rx="2"/><rect x="614" y="247" width="12" height="12" rx="2"/><rect x="632" y="269" width="12" height="12" rx="2"/><rect x="650" y="255" width="12" height="12" rx="2"/><rect x="668" y="265" width="12" height="12" rx="2"/><rect x="686" y="250" width="12" height="12" rx="2"/><rect x="704" y="271" width="12" height="12" rx="2"/><rect x="722" y="258" width="12" height="12" rx="2"/><rect x="740" y="248" width="12" height="12" rx="2"/><rect x="758" y="267" width="12" height="12" rx="2"/><rect x="776" y="253" width="12" height="12" rx="2"/><rect x="794" y="263" width="12" height="12" rx="2"/><rect x="812" y="249" width="12" height="12" rx="2"/><rect x="830" y="270" width="12" height="12" rx="2"/><rect x="848" y="256" width="12" height="12" rx="2"/><rect x="866" y="266" width="12" height="12" rx="2"/><rect x="884" y="251" width="12" height="12" rx="2"/><rect x="902" y="272" width="12" height="12" rx="2"/><rect x="920" y="259" width="12" height="12" rx="2"/><rect x="938" y="247" width="12" height="12" rx="2"/><rect x="956" y="268" width="12" height="12" rx="2"/><rect x="974" y="254" width="12" height="12" rx="2"/><rect x="992" y="264" width="12" height="12" rx="2"/><rect x="1010" y="250" width="12" height="12" rx="2"/><rect x="1028" y="271" width="12" height="12" rx="2"/><rect x="1046" y="257" width="12" height="12" rx="2"/><rect x="1064" y="248" width="12" height="12" rx="2"/><rect x="1082" y="266" width="12" height="12" rx="2"/><rect x="1100" y="253" width="12" height="12" rx="2"/><rect x="1118" y="262" width="12" height="12" rx="2"/><rect x="1136" y="249" width="12" height="12" rx="2"/><rect x="1154" y="269" width="12" height="12" rx="2"/><rect x="1172" y="255" width="12" height="12" rx="2"/><rect x="1190" y="265" width="12" height="12" rx="2"/><rect x="1208" y="251" width="12" height="12" rx="2"/><rect x="1226" y="272" width="12" height="12" rx="2"/><rect x="1244" y="258" width="12" height="12" rx="2"/><rect x="1262" y="247" width="12" height="12" rx="2"/><rect x="1280" y="267" width="12" height="12" rx="2"/><rect x="1298" y="254" width="12" height="12" rx="2"/><rect x="1316" y="263" width="12" height="12" rx="2"/><rect x="1334" y="250" width="12" height="12" rx="2"/><rect x="1352" y="270" width="12" height="12" rx="2"/><rect x="1370" y="256" width="12" height="12" rx="2"/><rect x="1388" y="266" width="12" height="12" rx="2"/><rect x="1406" y="252" width="12" height="12" rx="2"/><rect x="1424" y="271" width="12" height="12" rx="2"/><rect x="1442" y="259" width="12" height="12" rx="2"/><rect x="1460" y="248" width="12" height="12" rx="2"/><rect x="1478" y="268" width="12" height="12" rx="2"/>
+    </g>
+    <text x="100" y="306" font-size="14" fill="#9a9da6">a block's level is set by its PoW hash alone: level >= L means it cost at least 2^(31+L) hashes, whatever difficulty it claims</text>
+  </g>
+
+  <!-- ladder level 32 -->
+  <g>
+    <text x="80" y="380" font-size="18" font-weight="600" fill="#15594d">level >= 32</text>
+    <text x="80" y="402" font-size="14" fill="#7a7d86">2^63 hashes each, ~125 per hour</text>
+    <line x1="300" y1="386" x2="1480" y2="386" stroke="#c9d9d4" stroke-width="2"/>
+    <g fill="#1f7a6a">
+      <rect x="300" y="372" width="28" height="28" rx="5"/>
+      <rect x="470" y="372" width="28" height="28" rx="5"/>
+      <rect x="640" y="372" width="28" height="28" rx="5"/>
+      <rect x="810" y="372" width="28" height="28" rx="5"/>
+      <rect x="980" y="372" width="28" height="28" rx="5"/>
+      <rect x="1150" y="372" width="28" height="28" rx="5"/>
+      <rect x="1320" y="372" width="28" height="28" rx="5"/>
+      <rect x="1452" y="372" width="28" height="28" rx="5"/>
+    </g>
+    <text x="314" y="430" font-size="15" font-weight="600" fill="#15594d" text-anchor="middle">K</text>
+    <text x="314" y="449" font-size="13" fill="#7a7d86" text-anchor="middle">checkpoint</text>
+    <text x="1480" y="430" font-size="15" font-weight="600" fill="#15594d" text-anchor="end">B</text>
+    <text x="1480" y="449" font-size="13" fill="#7a7d86" text-anchor="end">tip, chain block</text>
+    <!-- walk arrows right to left -->
+    <g stroke="#1f7a6a" stroke-width="2" fill="none" marker-end="url(#ar)">
+      <path d="M1452,380 C1420,350 1380,350 1352,380"/>
+      <path d="M1320,380 C1250,340 1210,340 1182,380"/>
+      <path d="M1150,380 C1080,340 1040,340 1012,380"/>
+      <path d="M980,380 C910,340 870,340 842,380"/>
+      <path d="M810,380 C740,340 700,340 672,380"/>
+      <path d="M640,380 C570,340 530,340 502,380"/>
+      <path d="M470,380 C400,340 360,340 332,380"/>
+    </g>
+    <text x="890" y="340" font-size="13" fill="#1f7a6a" text-anchor="middle">walk parents_by_level[32] from B back to K; every parent must be present and PoW-checked (closed walk)</text>
+  </g>
+
+  <!-- ladder level 30 -->
+  <g>
+    <text x="80" y="500" font-size="18" font-weight="600" fill="#15594d">level >= 30</text>
+    <text x="80" y="522" font-size="14" fill="#7a7d86">2^61 hashes each, ~530 per hour</text>
+    <line x1="300" y1="506" x2="1480" y2="506" stroke="#c9d9d4" stroke-width="2"/>
+    <g fill="#49b09a">
+      <rect x="300" y="496" width="20" height="20" rx="4"/><rect x="350" y="496" width="20" height="20" rx="4"/><rect x="392" y="496" width="20" height="20" rx="4"/><rect x="440" y="496" width="20" height="20" rx="4"/><rect x="474" y="496" width="20" height="20" rx="4"/><rect x="530" y="496" width="20" height="20" rx="4"/><rect x="566" y="496" width="20" height="20" rx="4"/><rect x="610" y="496" width="20" height="20" rx="4"/><rect x="644" y="496" width="20" height="20" rx="4"/><rect x="700" y="496" width="20" height="20" rx="4"/><rect x="740" y="496" width="20" height="20" rx="4"/><rect x="780" y="496" width="20" height="20" rx="4"/><rect x="814" y="496" width="20" height="20" rx="4"/><rect x="860" y="496" width="20" height="20" rx="4"/><rect x="900" y="496" width="20" height="20" rx="4"/><rect x="950" y="496" width="20" height="20" rx="4"/><rect x="984" y="496" width="20" height="20" rx="4"/><rect x="1030" y="496" width="20" height="20" rx="4"/><rect x="1070" y="496" width="20" height="20" rx="4"/><rect x="1110" y="496" width="20" height="20" rx="4"/><rect x="1154" y="496" width="20" height="20" rx="4"/><rect x="1200" y="496" width="20" height="20" rx="4"/><rect x="1240" y="496" width="20" height="20" rx="4"/><rect x="1290" y="496" width="20" height="20" rx="4"/><rect x="1324" y="496" width="20" height="20" rx="4"/><rect x="1370" y="496" width="20" height="20" rx="4"/><rect x="1410" y="496" width="20" height="20" rx="4"/><rect x="1456" y="496" width="20" height="20" rx="4"/>
+    </g>
+    <text x="890" y="548" font-size="13" fill="#1f7a6a" text-anchor="middle">same walk at level 30: more blocks, tighter count (error is 1/sqrt(count): ±4.3% per hour here, ±9% at level 32 alone)</text>
+  </g>
+
+  <!-- the burn: C -> chain -> B via seq_commit -->
+  <g>
+    <text x="80" y="620" font-size="18" font-weight="600" fill="#2a3490">the burn</text>
+    <text x="80" y="642" font-size="14" fill="#7a7d86">tx accepted in chain block C</text>
+    <rect x="300" y="606" width="28" height="28" rx="5" fill="#4a56b8"/>
+    <text x="314" y="660" font-size="15" font-weight="600" fill="#2a3490" text-anchor="middle">C</text>
+    <g fill="#b9bde8">
+      <rect x="360" y="612" width="16" height="16" rx="3"/><rect x="400" y="612" width="16" height="16" rx="3"/><rect x="440" y="612" width="16" height="16" rx="3"/><rect x="480" y="612" width="16" height="16" rx="3"/>
+      <text x="530" y="626" font-size="16" fill="#8a8ec8">· · · selected chain, one blake3 per block · · ·</text>
+      <rect x="1300" y="612" width="16" height="16" rx="3"/><rect x="1340" y="612" width="16" height="16" rx="3"/><rect x="1380" y="612" width="16" height="16" rx="3"/><rect x="1420" y="612" width="16" height="16" rx="3"/>
+    </g>
+    <path d="M1444,620 L1506,620 L1506,386 L1488,386" fill="none" stroke="#4a56b8" stroke-width="2" stroke-dasharray="5,4" marker-end="url(#arp)"/>
+    <text x="890" y="690" font-size="13" fill="#4a56b8" text-anchor="middle">tx body hashes to its id; id sits in C's KIP-21 activity commitment; seq_commit(C) folds through every chain block's state root until it equals B's accepted_id_merkle_root</text>
+    <text x="890" y="710" font-size="13" fill="#4a56b8" text-anchor="middle">so the burn is bound to the same B whose ladder was counted. No GHOSTDAG in the proof, no trust in blue_work.</text>
+  </g>
+
+  <!-- journal -->
+  <rect x="80" y="750" width="1440" height="96" rx="12" fill="#15161a"/>
+  <text x="104" y="782" font-size="16" font-weight="600" fill="#fbfaf6">the journal (public output of the proof, 142 + 68 bytes per burn)</text>
+  <text x="104" y="810" font-size="15" fill="#c9cad0" font-family="'DejaVu Sans Mono', Menlo, monospace">K | B | B.daa | headers | (level, count) x 8 | target contract | burns: tx id, amount, tip, recipient</text>
+  <text x="104" y="834" font-size="13" fill="#9a9da6">The contract keeps K, requires journal.K == K and target == itself, verifies the seal, and within the window keeps the submission with the higher count. Then B becomes K and the burns are minted.</text>
+  <text x="1500" y="876" font-size="13" fill="#9a9da6" text-anchor="end">Kozmic, Kaspero Labs. Measured on mainnet, October 2026.</text>
+</svg>

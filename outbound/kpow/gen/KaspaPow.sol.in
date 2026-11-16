@@ -1,0 +1,363 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.24;
+
+/// @title KaspaPow: Kaspa mainnet header hash and kHeavyHash proof of work, checked in the EVM.
+/// @notice Measurement contract for the outbound study (E10). Not audited, not for deployment with value.
+/// Ported from rusty-kaspa v2.1.0: consensus/core/src/hashing/header.rs, consensus/pow/src/{lib,matrix,xoshiro}.rs,
+/// crypto/hashes/src/pow_hashers.rs. Generated from gen/KaspaPow.sol.in by gen/build.py (keccak-f is generated).
+///
+/// Header bytes are the exact preimage rusty-kaspa feeds to blake2b (see kpow-vectors `preimage`).
+/// Kaspa hashes are kept in their natural byte order inside bytes32 (byte 0 = most significant byte).
+contract KaspaPow {
+    uint256 internal constant MAX_BLOCK_LEVEL = 225; // MAINNET_PARAMS
+    uint256 internal constant M64 = 0xffffffffffffffff;
+    uint256 internal constant P = 0xffffffffffffffc5; // 2^64 - 59, prime; rank mod P == 64 implies rank over Q == 64
+
+    struct Parsed {
+        uint256 timestampOffset; // offset of timestamp(8) | bits(4) | nonce(8) in the header bytes
+        uint64 timestamp;
+        uint32 bits;
+        uint64 nonce;
+    }
+
+    // ------------------------------------------------------------------ parsing
+
+    /// Little-endian u64 (n = 8) or u32 (n = 4) at `off`.
+    function _le(bytes calldata h, uint256 off, uint256 n) internal pure returns (uint256 v) {
+        require(off + n <= h.length, "short");
+        uint256 w;
+        assembly { w := shr(192, calldataload(add(h.offset, off))) } // 8 bytes, big-endian
+        v = _bswap64(w);
+        if (n == 4) v &= 0xffffffff;
+    }
+
+    /// Walks the serialized header and returns where the time/bits/nonce fields sit. Reverts on malformed input.
+    function parse(bytes calldata h) public pure returns (Parsed memory p) {
+        uint256 levels = _le(h, 2, 8);
+        require(levels > 0 && levels <= 255, "levels");
+        uint256 o = 10;
+        for (uint256 i = 0; i < levels; i++) {
+            uint256 cnt = _le(h, o, 8);
+            require(cnt <= 255, "parents");
+            o += 8 + 32 * cnt;
+        }
+        o += 96; // hash_merkle_root, accepted_id_merkle_root, utxo_commitment
+        p.timestampOffset = o;
+        p.timestamp = uint64(_le(h, o, 8));
+        p.bits = uint32(_le(h, o + 8, 4));
+        p.nonce = uint64(_le(h, o + 12, 8));
+        o += 20 + 16; // + daa_score, blue_score
+        uint256 bwLen = _le(h, o, 8);
+        require(bwLen <= 24, "blue work");
+        o += 8 + bwLen + 32; // blue_work, pruning_point
+        require(o == h.length, "length");
+    }
+
+    // ------------------------------------------------------------------ blake2b-256 keyed "BlockHash" (EIP-152)
+
+    /// blake2b(key = "BlockHash", out = 32) over `data`, using the BLAKE2b F precompile at 0x09.
+    function blake2bBlockHash(bytes memory data) public view returns (bytes32 out) {
+        assembly {
+            let n := mload(data)
+            let src := add(data, 32)
+            let buf := mload(0x40)
+            mstore(0x40, add(buf, 256))
+            // rounds = 12, h = IV with param block (digest 32, key length 9) folded in, little-endian words
+            mstore(buf, shl(224, 12))
+            mstore(add(buf, 4), 0x28c0bdf267e6096a3ba7ca8485ae67bb2bf894fe72f36e3cf1361d5f3af54fa5)
+            mstore(add(buf, 36), 0xd182e6ad7f520e511f6c3e2b8c68059b6bbd41fbabd9831f79217e1319cde05b)
+            // first block: the key, zero padded to 128 bytes
+            mstore(add(buf, 68), 0x426c6f636b486173680000000000000000000000000000000000000000000000)
+            mstore(add(buf, 100), 0)
+            mstore(add(buf, 132), 0)
+            mstore(add(buf, 164), 0)
+            let total := add(128, n)
+            let blocks := div(add(total, 127), 128)
+            for { let b := 0 } lt(b, blocks) { b := add(b, 1) } {
+                if gt(b, 0) {
+                    // message block b-1: copy 128 bytes, zero the tail past the end of data
+                    let mo := mul(sub(b, 1), 128)
+                    let left := sub(n, mo)
+                    for { let k := 0 } lt(k, 128) { k := add(k, 32) } {
+                        let w := mload(add(src, add(mo, k)))
+                        if lt(left, add(k, 32)) {
+                            switch gt(left, k)
+                            case 0 { w := 0 }
+                            default { w := and(w, not(shr(mul(8, sub(left, k)), not(0)))) }
+                        }
+                        mstore(add(buf, add(68, k)), w)
+                    }
+                }
+                let last := eq(add(b, 1), blocks)
+                let t := mul(add(b, 1), 128)
+                if last { t := total }
+                // t as two little-endian u64 (t1 = 0), then the final flag
+                let tle := 0
+                for { let i := 0 } lt(i, 8) { i := add(i, 1) } {
+                    tle := or(tle, shl(mul(8, sub(7, i)), and(shr(mul(8, i), t), 0xff)))
+                }
+                mstore(add(buf, 196), shl(192, tle))
+                mstore8(add(buf, 212), last)
+                if iszero(staticcall(gas(), 0x09, buf, 213, add(buf, 4), 64)) { revert(0, 0) }
+            }
+            out := mload(add(buf, 4))
+        }
+    }
+
+    // ------------------------------------------------------------------ keccak-f[1600] and the two cSHAKE256 hashers
+
+    function _keccakF(uint256 statePtr) internal pure {
+        assembly {
+@@KECCAK@@
+            let scratch := mload(0x40)
+            mstore(0x40, add(scratch, 1888))
+            keccakF(statePtr, scratch)
+        }
+    }
+
+    function _bswap64(uint256 x) internal pure returns (uint256 y) {
+        x = ((x & 0xff00ff00ff00ff00) >> 8) | ((x & 0x00ff00ff00ff00ff) << 8);
+        x = ((x & 0xffff0000ffff0000) >> 16) | ((x & 0x0000ffff0000ffff) << 16);
+        y = (x >> 32) | ((x & 0xffffffff) << 32);
+    }
+
+    /// Kaspa `Hash::iter_le_u64` word k of a 32-byte hash.
+    function _lane(bytes32 h, uint256 k) internal pure returns (uint256) {
+        return _bswap64((uint256(h) >> (192 - 64 * k)) & M64);
+    }
+
+    /// `Hash::from_le_u64` of lanes 0..3 of a state.
+    function _squeeze(uint256[25] memory st) internal pure returns (bytes32 out) {
+        uint256 v;
+        for (uint256 k = 0; k < 4; k++) v |= _bswap64(st[k]) << (192 - 64 * k);
+        out = bytes32(v);
+    }
+
+    /// cSHAKE256("ProofOfWorkHash") over pre_pow_hash | timestamp | 32 zero bytes | nonce.
+    function powHash(bytes32 prePow, uint64 timestamp, uint64 nonce) public pure returns (bytes32) {
+        uint256[25] memory st = [
+            uint256(1242148031264380989), 3008272977830772284, 2188519011337848018, 1992179434288343456, 8876506674959887717,
+            5399642050693751366, 1745875063082670864, 8605242046444978844, 17936695144567157056, 3343109343542796272,
+            1123092876221303306, 4963925045340115282, 17037383077651887893, 16629644495023626889, 12833675776649114147,
+            3784524041015224902, 1082795874807940378, 13952716920571277634, 13411128033953605860, 15060696040649351053,
+            9928834659948351306, 5237849264682708699, 12825353012139217522, 6706187291358897596, 196324915476054915
+        ];
+        for (uint256 k = 0; k < 4; k++) st[k] ^= _lane(prePow, k);
+        st[4] ^= timestamp;
+        st[9] ^= nonce;
+        uint256 a;
+        assembly { a := st }
+        _keccakF(a);
+        return _squeeze(st);
+    }
+
+    /// cSHAKE256("HeavyHash") over 32 bytes.
+    function kHeavyHash(bytes32 x) public pure returns (bytes32) {
+        uint256[25] memory st = [
+            uint256(4239941492252378377), 8746723911537738262, 8796936657246353646, 1272090201925444760, 16654558671554924250,
+            8270816933120786537, 13907396207649043898, 6782861118970774626, 9239690602118867528, 11582319943599406348,
+            17596056728278508070, 15212962468105129023, 7812475424661425213, 3370482334374859748, 5690099369266491460,
+            8596393687355028144, 570094237299545110, 9119540418498120711, 16901969272480492857, 13372017233735502424,
+            14372891883993151831, 5171152063242093102, 10573107899694386186, 6096431547456407061, 1592359455985097269
+        ];
+        for (uint256 k = 0; k < 4; k++) st[k] ^= _lane(x, k);
+        uint256 a;
+        assembly { a := st }
+        _keccakF(a);
+        return _squeeze(st);
+    }
+
+    // ------------------------------------------------------------------ matrix
+
+    /// xoshiro256++ seeded with pre_pow_hash; row i packs nibble j at bits 4j (the four outputs side by side).
+    /// `skip` full matrices are generated and discarded first (to follow rusty-kaspa's regenerate-until-full-rank loop).
+    function genMatrix(bytes32 prePow, uint256 skip) public pure returns (uint256[64] memory rows) {
+        uint256 s0 = _lane(prePow, 0);
+        uint256 s1 = _lane(prePow, 1);
+        uint256 s2 = _lane(prePow, 2);
+        uint256 s3 = _lane(prePow, 3);
+        assembly {
+            let m := 0xffffffffffffffff
+            for { let rep := 0 } iszero(gt(rep, skip)) { rep := add(rep, 1) } {
+                for { let i := 0 } lt(i, 64) { i := add(i, 1) } {
+                    let row := 0
+                    for { let k := 0 } lt(k, 256) { k := add(k, 64) } {
+                        let x := and(add(s0, s3), m)
+                        let res := and(add(s0, and(or(shl(23, x), shr(41, x)), m)), m)
+                        let t := and(shl(17, s1), m)
+                        s2 := xor(s2, s0)
+                        s3 := xor(s3, s1)
+                        s1 := xor(s1, s2)
+                        s0 := xor(s0, s3)
+                        s2 := xor(s2, t)
+                        s3 := and(or(shl(45, s3), shr(19, s3)), m)
+                        row := or(row, shl(k, res))
+                    }
+                    mstore(add(rows, shl(5, i)), row)
+                }
+            }
+        }
+    }
+
+    /// Exact full-rank test: fraction-free Gaussian elimination mod P. Full rank mod P implies full rank over the
+    /// rationals; the converse can fail with probability about 64/P, which would only reject a valid header.
+    function fullRank(uint256[64] memory rows) public pure returns (bool ok) {
+        assembly {
+            // m: 64 x 64 words, row pointers in r
+            let m := mload(0x40)
+            let r := add(m, 131072)
+            mstore(0x40, add(r, 2048))
+            for { let i := 0 } lt(i, 64) { i := add(i, 1) } {
+                let row := mload(add(rows, shl(5, i)))
+                let base := add(m, shl(11, i))
+                mstore(add(r, shl(5, i)), base)
+                for { let j := 0 } lt(j, 64) { j := add(j, 1) } {
+                    mstore(add(base, shl(5, j)), and(shr(shl(2, j), row), 0xf))
+                }
+            }
+            ok := 1
+            let p := 0xffffffffffffffc5
+            for { let c := 0 } lt(c, 64) { c := add(c, 1) } {
+                // pivot search
+                let piv := c
+                for {} lt(piv, 64) { piv := add(piv, 1) } {
+                    if mload(add(mload(add(r, shl(5, piv))), shl(5, c))) { break }
+                }
+                if eq(piv, 64) { ok := 0 break }
+                let pr := mload(add(r, shl(5, piv)))
+                mstore(add(r, shl(5, piv)), mload(add(r, shl(5, c))))
+                mstore(add(r, shl(5, c)), pr)
+                let pv := mload(add(pr, shl(5, c)))
+                for { let k := add(c, 1) } lt(k, 64) { k := add(k, 1) } {
+                    let kr := mload(add(r, shl(5, k)))
+                    let f := mload(add(kr, shl(5, c)))
+                    if f {
+                        let nf := sub(p, f)
+                        for { let j := c } lt(j, 64) { j := add(j, 1) } {
+                            let q := add(kr, shl(5, j))
+                            mstore(q, addmod(mulmod(mload(q), pv, p), mulmod(mload(add(pr, shl(5, j))), nf, p), p))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Spreads 16 nibbles (nibble t at bits 4t) into 16-bit lanes (nibble t at bits 16t).
+    function _spread(uint256 x) internal pure returns (uint256) {
+        x = (x & 0xffffffff) | ((x >> 32) << 128);
+        x = (x & 0xffff0000000000000000000000000000ffff) | ((x & 0x00ffff0000000000000000000000000000ffff0000) << 48);
+        x = (x & 0xff00000000000000ff00000000000000ff00000000000000ff)
+            | ((x & 0xff00000000000000ff00000000000000ff00000000000000ff00) << 24);
+        x = (x & 0xf0000000f0000000f0000000f0000000f0000000f0000000f0000000f)
+            | ((x & 0xf0000000f0000000f0000000f0000000f0000000f0000000f0000000f0) << 12);
+        return x;
+    }
+
+    /// Matrix times the 64 nibbles of `h` (high nibble first), top 4 bits of each sum, XOR h, then cSHAKE256("HeavyHash").
+    /// Dot products use one 256-bit multiply per 16 nibbles: with a's lanes in order and b's lanes reversed, lane 15
+    /// of a*b is the dot product (every lane sum is at most 16*15*15 = 3600 < 2^16, so no carries cross lanes).
+    function heavyHash(uint256[64] memory rows, bytes32 h) public pure returns (bytes32) {
+        uint256 hv = uint256(h);
+        uint256 b0 = _spread(hv >> 192);
+        uint256 b1 = _spread((hv >> 128) & M64);
+        uint256 b2 = _spread((hv >> 64) & M64);
+        uint256 b3 = _spread(hv & M64);
+        uint256 prod;
+        assembly {
+            function spread(x) -> y {
+                x := or(and(x, 0xffffffff), shl(128, shr(32, x)))
+                x := or(and(x, 0xffff0000000000000000000000000000ffff), shl(48, and(x, 0xffff0000000000000000000000000000ffff0000)))
+                x := or(and(x, 0xff00000000000000ff00000000000000ff00000000000000ff), shl(24, and(x, 0xff00000000000000ff00000000000000ff00000000000000ff00)))
+                y := or(and(x, 0xf0000000f0000000f0000000f0000000f0000000f0000000f0000000f), shl(12, and(x, 0xf0000000f0000000f0000000f0000000f0000000f0000000f0000000f0)))
+            }
+            function dot(r, c0, c1, c2, c3) -> s {
+                let m := 0xffffffffffffffff
+                s := add(add(shr(240, mul(spread(and(r, m)), c0)), shr(240, mul(spread(and(shr(64, r), m)), c1))),
+                         add(shr(240, mul(spread(and(shr(128, r), m)), c2)), shr(240, mul(spread(shr(192, r)), c3))))
+            }
+            for { let i := 0 } lt(i, 32) { i := add(i, 1) } {
+                let p1 := add(rows, shl(6, i))
+                let s1 := dot(mload(p1), b0, b1, b2, b3)
+                let s2 := dot(mload(add(p1, 32)), b0, b1, b2, b3)
+                prod := or(prod, shl(shl(3, sub(31, i)), and(or(shl(4, shr(10, s1)), shr(10, s2)), 0xff)))
+            }
+        }
+        return kHeavyHash(bytes32(prod ^ hv));
+    }
+
+    // ------------------------------------------------------------------ the whole check
+
+    function target(uint32 bits) public pure returns (uint256) {
+        uint256 e = bits >> 24;
+        uint256 mant = bits & 0xffffff;
+        if (mant > 0x7fffff) return 0;
+        return e <= 3 ? mant >> (8 * (3 - e)) : mant << (8 * (e - 3));
+    }
+
+    function _bitLen(uint256 x) internal pure returns (uint256 n) {
+        while (x != 0) {
+            x >>= 1;
+            n++;
+        }
+    }
+
+    function _reverse32(bytes32 h) internal pure returns (uint256 v) {
+        for (uint256 k = 0; k < 4; k++) v |= _bswap64((uint256(h) >> (192 - 64 * k)) & M64) << (64 * k);
+    }
+
+    function prePowHash(bytes calldata h, Parsed memory p) public view returns (bytes32) {
+        bytes memory z = h;
+        uint256 o = p.timestampOffset;
+        for (uint256 i = 0; i < 8; i++) {
+            z[o + i] = 0;
+            z[o + 12 + i] = 0;
+        }
+        return blake2bBlockHash(z);
+    }
+
+    /// Full check of one header. `matrixSkip` is the number of rank-deficient matrices before the one consensus used
+    /// (0 for practically every block; a prover supplies it). With `rankCheck`, the used matrix is proven full rank;
+    /// rejected-matrix rank deficiency is not proven here (see E10 notes).
+    function verify(bytes calldata h, uint256 matrixSkip, bool rankCheck)
+        public
+        view
+        returns (bytes32 hash, uint256 pow, uint256 level, bool ok)
+    {
+        Parsed memory p = parse(h);
+        hash = blake2bBlockHash(h);
+        bytes32 pre = prePowHash(h, p);
+        bytes32 ph = powHash(pre, p.timestamp, p.nonce);
+        uint256[64] memory rows = genMatrix(pre, matrixSkip);
+        if (rankCheck) require(fullRank(rows), "matrix rank");
+        pow = _reverse32(heavyHash(rows, ph));
+        ok = pow <= target(p.bits);
+        uint256 bl = _bitLen(pow);
+        level = bl >= MAX_BLOCK_LEVEL ? 0 : MAX_BLOCK_LEVEL - bl;
+    }
+
+    /// Gas per stage measured inside the contract (no call or ABI overhead), for the report.
+    function profile(bytes calldata h, uint256 matrixSkip) external view returns (uint256[7] memory g) {
+        uint256 t = gasleft();
+        Parsed memory p = parse(h);
+        g[0] = t - gasleft();
+        t = gasleft();
+        blake2bBlockHash(h);
+        g[1] = t - gasleft();
+        t = gasleft();
+        bytes32 pre = prePowHash(h, p);
+        g[2] = t - gasleft();
+        t = gasleft();
+        bytes32 ph = powHash(pre, p.timestamp, p.nonce);
+        g[3] = t - gasleft();
+        t = gasleft();
+        uint256[64] memory rows = genMatrix(pre, matrixSkip);
+        g[4] = t - gasleft();
+        t = gasleft();
+        heavyHash(rows, ph);
+        g[5] = t - gasleft();
+        t = gasleft();
+        fullRank(rows);
+        g[6] = t - gasleft();
+    }
+}

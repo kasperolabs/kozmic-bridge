@@ -1,0 +1,41 @@
+{
+  "_": "Ethereum networks for usdc/script/u7.sh (via usdc/script/ethnet.sh) and the inbound service. ETH_NET picks the entry. rpcFile is a path at the repo root whose first line is the execution RPC URL (never committed). Circle's FiatToken code is always read from mainnet (eth-rpc-url.txt), whatever ETH_NET is.",
+  "mainnet": {
+    "chainId": 1,
+    "helios": "mainnet",
+    "genesisTime": 1606824023,
+    "beacons": [
+      "https://ethereum-beacon-api.publicnode.com"
+    ],
+    "rpcFile": "eth-rpc-url.txt",
+    "verifier": "0x8EaB2D97Dfce405A1692a21b3ff3A172d593D319",
+    "gloasEpoch": null,
+    "maxGwei": 1.5,
+    "explorer": "https://etherscan.io"
+  },
+  "sepolia": {
+    "chainId": 11155111,
+    "helios": "sepolia",
+    "genesisTime": 1655733600,
+    "beacons": [
+      "https://lodestar-sepolia.chainsafe.io"
+    ],
+    "rpcFile": "eth-rpc-url-sepolia.txt",
+    "verifier": "0x925d8331ddc0a1F0d96E68CF073DFE1d92b69187",
+    "gloasEpoch": null,
+    "maxGwei": 50,
+    "explorer": "https://sepolia.etherscan.io"
+  },
+  "anvil": {
+    "chainId": 11155111,
+    "helios": "sepolia",
+    "genesisTime": 1655733600,
+    "beacons": [],
+    "rpcFile": "eth-rpc-url-anvil.txt",
+    "verifier": "0x925d8331ddc0a1F0d96E68CF073DFE1d92b69187",
+    "gloasEpoch": null,
+    "maxGwei": 100,
+    "explorer": "",
+    "_": "sprint 6 fork tests: anvil forked from Sepolia at 127.0.0.1:8545 (eth-rpc-url-anvil.txt); the chain id is the fork's"
+  }
+}

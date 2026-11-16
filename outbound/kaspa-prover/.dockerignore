@@ -1,0 +1,6 @@
+# the Docker build context is this directory; keep local build output and run artifacts out of it
+target
+methods/guest/target
+out*
+*.bin
+*.log

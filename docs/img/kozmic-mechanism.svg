@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" font-family="Inter, 'DejaVu Sans', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrowK" markerWidth="14" markerHeight="14" refX="11" refY="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L14,7 L0,14 z" fill="#1f7a6a"/>
+    </marker>
+    <marker id="arrowE" markerWidth="14" markerHeight="14" refX="11" refY="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0,0 L14,7 L0,14 z" fill="#4a56b8"/>
+    </marker>
+  </defs>
+  <rect width="1600" height="900" fill="#fbfaf6"/>
+
+  <!-- title -->
+  <text x="80" y="92" font-size="44" font-weight="600" fill="#15161a">Kozmic: Kaspa and Ethereum read each other</text>
+  <text x="80" y="130" font-size="22" fill="#5a5d66">Two light clients inside one zkVM. No signer, no relayer key, no admin. Everything below ran on both mainnets, October 2026.</text>
+
+  <!-- chain boxes -->
+  <g>
+    <rect x="80" y="200" width="300" height="520" rx="18" fill="#eef0fb" stroke="#4a56b8" stroke-width="3"/>
+    <text x="230" y="262" font-size="34" font-weight="600" fill="#2a3490" text-anchor="middle">Ethereum</text>
+    <text x="230" y="294" font-size="18" fill="#4a56b8" text-anchor="middle">mainnet</text>
+    <text x="104" y="350" font-size="17" fill="#2a2c33" font-weight="600">Vault.sol</text>
+    <text x="104" y="374" font-size="15" fill="#5a5d66">lock, no withdraw, no owner</text>
+    <text x="104" y="398" font-size="14" fill="#7a7d86" font-family="'DejaVu Sans Mono', Menlo, monospace">0x3DD8…D529</text>
+    <text x="104" y="470" font-size="17" fill="#2a2c33" font-weight="600">KaspaRelay.sol</text>
+    <text x="104" y="494" font-size="15" fill="#5a5d66">checkpoint, window, mints wKAS</text>
+    <text x="104" y="518" font-size="14" fill="#7a7d86" font-family="'DejaVu Sans Mono', Menlo, monospace">0x3f6C…69E0</text>
+    <text x="104" y="586" font-size="17" fill="#2a2c33" font-weight="600">RISC Zero Groth16 verifier</text>
+    <text x="104" y="610" font-size="15" fill="#5a5d66">RISC Zero's own, ~265k gas</text>
+    <text x="104" y="634" font-size="14" fill="#7a7d86" font-family="'DejaVu Sans Mono', Menlo, monospace">router 0x8EaB…D319</text>
+  </g>
+  <g>
+    <rect x="1220" y="200" width="300" height="520" rx="18" fill="#e9f6f3" stroke="#1f7a6a" stroke-width="3"/>
+    <text x="1370" y="262" font-size="34" font-weight="600" fill="#15594d" text-anchor="middle">Kaspa</text>
+    <text x="1370" y="294" font-size="18" fill="#1f7a6a" text-anchor="middle">mainnet, L1</text>
+    <text x="1244" y="350" font-size="17" fill="#2a2c33" font-weight="600">bridge.sil covenant</text>
+    <text x="1244" y="374" font-size="15" fill="#5a5d66">state machine, mints KCC-20</text>
+    <text x="1244" y="398" font-size="14" fill="#7a7d86" font-family="'DejaVu Sans Mono', Menlo, monospace">ac21e831…ea0b</text>
+    <text x="1244" y="470" font-size="17" fill="#2a2c33" font-weight="600">OpZkVerify (KIP-16)</text>
+    <text x="1244" y="494" font-size="15" fill="#5a5d66">Groth16 in script, 1550 budget units</text>
+    <text x="1244" y="518" font-size="14" fill="#7a7d86" font-family="'DejaVu Sans Mono', Menlo, monospace">~0.16 KAS per verify</text>
+    <text x="1244" y="586" font-size="17" fill="#2a2c33" font-weight="600">burn output</text>
+    <text x="1244" y="610" font-size="15" fill="#5a5d66">unspendable key, recipient in payload</text>
+    <text x="1244" y="634" font-size="14" fill="#7a7d86" font-family="'DejaVu Sans Mono', Menlo, monospace">kaspa:qpgf9xm5…u3wx3</text>
+  </g>
+
+  <!-- top arrow: Ethereum -> Kaspa -->
+  <line x1="400" y1="300" x2="1196" y2="300" stroke="#1f7a6a" stroke-width="4" marker-end="url(#arrowK)"/>
+  <text x="800" y="246" font-size="24" font-weight="600" fill="#15594d" text-anchor="middle">Ethereum to Kaspa: lock, prove finality, mint</text>
+  <g font-size="15.5" fill="#2a2c33">
+    <text x="420" y="338" font-weight="600">1  deposit</text>
+    <text x="420" y="362" fill="#5a5d66">ERC-20 into the vault,</text>
+    <text x="420" y="384" fill="#5a5d66">Kaspa address as data</text>
+
+    <text x="690" y="338" font-weight="600">2  prove</text>
+    <text x="690" y="362" fill="#5a5d66">sync committee finality (BLS)</text>
+    <text x="690" y="384" fill="#5a5d66">+ storage proof of the deposit</text>
+    <text x="690" y="406" fill="#5a5d66">~55M cycles, ~2 min on a 4090</text>
+
+    <text x="1000" y="338" font-weight="600">3  verify and mint</text>
+    <text x="1000" y="362" fill="#5a5d66">covenant checks the seal,</text>
+    <text x="1000" y="384" fill="#5a5d66">journal names the recipient,</text>
+    <text x="1000" y="406" fill="#5a5d66">KCC-20 minted on L1</text>
+  </g>
+  <text x="800" y="446" font-size="15" fill="#7a7d86" text-anchor="middle">deposit to mint 18.5 min, 13.8 of them Ethereum finality. Live since CP-7, prover service with no human step.</text>
+
+  <!-- bottom arrow: Kaspa -> Ethereum -->
+  <line x1="1200" y1="600" x2="404" y2="600" stroke="#4a56b8" stroke-width="4" marker-end="url(#arrowE)"/>
+  <text x="800" y="546" font-size="24" font-weight="600" fill="#2a3490" text-anchor="middle">Kaspa to Ethereum: burn, prove work, mint</text>
+  <g font-size="15.5" fill="#2a2c33">
+    <text x="1010" y="638" font-weight="600">1  burn</text>
+    <text x="1010" y="662" fill="#5a5d66">KAS to a key nobody holds,</text>
+    <text x="1010" y="684" fill="#5a5d66">recipient in the payload</text>
+
+    <text x="705" y="638" font-weight="600">2  prove</text>
+    <text x="705" y="662" fill="#5a5d66">headers' PoW, superblock walks,</text>
+    <text x="705" y="684" fill="#5a5d66">acceptance via KIP-21 commitments</text>
+    <text x="705" y="706" fill="#5a5d66">37M cycles per 5 min of chain, 71 s</text>
+
+    <text x="420" y="638" font-weight="600">3  verify and mint</text>
+    <text x="420" y="662" fill="#5a5d66">contract checks the seal, 371k gas,</text>
+    <text x="420" y="684" fill="#5a5d66">heaviest proof in the window wins,</text>
+    <text x="420" y="706" fill="#5a5d66">wKAS to the recipient</text>
+  </g>
+  <text x="800" y="746" font-size="15" fill="#7a7d86" text-anchor="middle">burn to accepted proof 11 min, then a one-hour window; burn to wKAS balance 72 min. First mint: block 26,193,575.</text>
+
+  <!-- center: the shared piece -->
+  <rect x="610" y="462" width="380" height="56" rx="28" fill="#15161a"/>
+  <text x="800" y="489" font-size="16" font-weight="600" fill="#fbfaf6" text-anchor="middle">RISC Zero zkVM 3.0.4, Groth16 receipts</text>
+  <text x="800" y="508" font-size="13" fill="#c9cad0" text-anchor="middle">same 256-byte seal format, both chains verify it</text>
+
+  <!-- footer -->
+  <line x1="80" y1="790" x2="1520" y2="790" stroke="#d8d9de" stroke-width="1.5"/>
+  <text x="80" y="828" font-size="16" fill="#5a5d66">Immutable programs, pinned image ids, small caps. Security model on the way back: work sampling, not full consensus (attacker needs more than the honest hashrate for a whole window).</text>
+  <text x="80" y="856" font-size="16" fill="#5a5d66">Kaspero Labs. Code, txids and every measured number in the kaspa-zk-tests repository.</text>
+</svg>

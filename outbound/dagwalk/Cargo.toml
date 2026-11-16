@@ -1,0 +1,19 @@
+[package]
+name = "dagwalk"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Walks a window of the Kaspa mainnet DAG from a node and measures superblocks per level, DAG-wide, and how parents_by_level[L] links them (outbound study, weekend item 3 and E3' input)"
+
+# Pinned to the same rusty-kaspa release the bridge is built against (same pins as outbound/kpow/vectors).
+[dependencies]
+kaspa-consensus-core = { git = "https://github.com/kaspanet/rusty-kaspa", tag = "v2.1.0" }
+kaspa-pow = { git = "https://github.com/kaspanet/rusty-kaspa", tag = "v2.1.0" }
+kaspa-hashes = { git = "https://github.com/kaspanet/rusty-kaspa", tag = "v2.1.0" }
+kaspa-rpc-core = { git = "https://github.com/kaspanet/rusty-kaspa", tag = "v2.1.0" }
+kaspa-wrpc-client = { git = "https://github.com/kaspanet/rusty-kaspa", tag = "v2.1.0" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = 3

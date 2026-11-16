@@ -131,6 +131,19 @@ export function spendMasses(desc) {
   return { size, compute, transient };
 }
 
+/**
+ * KIP-9 makes a covenant output of value v cost 4C/v grams (plurality 2, squared), so parking v sompi in a cell that
+ * is never spent (a burn cell) costs v + 4C/v * rate in total; the minimum is at v = sqrt(4C * rate), 0.2 KAS at the
+ * minimum relay rate (100 sompi per gram), total 0.4 KAS. Never a constant: the optimum moves with the rate.
+ */
+export function optimalParkSompi(rateSompiPerGram = MINIMUM_RELAY_FEE_SOMPI_PER_KG / 1000n) {
+  const x = 4n * STORAGE_MASS_PARAMETER * rateSompiPerGram;
+  let r = BigInt(Math.floor(Math.sqrt(Number(x))));
+  while (r * r > x) r -= 1n;
+  while ((r + 1n) * (r + 1n) <= x) r += 1n;
+  return r;
+}
+
 export function minimumRelayFeeSompi(massGrams) {
   return (massGrams * MINIMUM_RELAY_FEE_SOMPI_PER_KG) / 1000n;
 }

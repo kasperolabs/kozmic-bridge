@@ -2,15 +2,18 @@
 //!
 //! Private input: a light-client store at checkpoint_in, zero or more sync-committee
 //! updates, one finality update, and optionally the vault's deposits to prove.
-//! Public output (journal): checkpoint_in, checkpoint_out, the sync committee hashes
-//! at both, the execution state root at checkpoint_out, the vault address and the
-//! verified deposits (nonce, amount, kaspa_spk).
+//! Public output (journal, v2): checkpoint_in, checkpoint_out, the sync committee hashes
+//! at both, the execution state root at checkpoint_out, the vault, the token and its
+//! implementation, and the verified deposits (nonce, amount, kaspa_spk, status).
 //!
 //! Everything the journal says about checkpoint_out is backed by a BLS aggregate
 //! signature of the sync committee that the store (i.e. the covenant state) names.
 //! Everything it says about a deposit is backed by Merkle-Patricia proofs against the
-//! execution state root of that finalized header, decoded with Vault.sol's storage
-//! layout, which is compiled into this program (so the image id pins it).
+//! execution state root of that finalized header: the vault's record decoded with
+//! UsdcVault's storage layout, and the depositor's blacklist word decoded with
+//! FiatTokenV2_2's layout. Both layouts are compiled into this program (so the image id
+//! pins them); the token's implementation address is committed, not judged, and the
+//! covenant pins it, so a token upgrade stalls minting rather than misreading a bit.
 //! Derived from risc0/r0vm-helios (MIT), ported to risc0 3.0.4 and helios 0.12.0.
 //!
 //! Two binaries wrap `run`: `eth-bridge-guest` (mainnet spec: 512-member committees,
@@ -19,9 +22,10 @@
 
 use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
 use alloy_rlp::Encodable;
-use alloy_trie::{proof, Nibbles};
+use alloy_trie::{proof, Nibbles, TrieAccount};
 use eth_bridge_primitives::{
-    compute_chain_commitment, vault_layout, Deposit, Journal, ProofInputs, VaultDeposits,
+    compute_chain_commitment, token_layout, vault_layout, Deposit, Journal, ProofInputs, VaultDeposits,
+    STATUS_MINT, STATUS_SKIP,
 };
 use helios_consensus_core::consensus_spec::ConsensusSpec;
 use helios_consensus_core::{
@@ -40,6 +44,7 @@ pub fn run<S: ConsensusSpec + serde::Serialize + serde::de::DeserializeOwned>() 
         genesis_root,
         forks,
         vault_deposits,
+        exec_header_rlp,
     } = serde_cbor::from_slice(&encoded_inputs).expect("decode inputs");
 
     // The prover does not get to assert a next committee. If the period rolls over,
@@ -91,18 +96,19 @@ pub fn run<S: ConsensusSpec + serde::Serialize + serde::de::DeserializeOwned>() 
     let new_committee: B256 = store.current_sync_committee.tree_hash_root();
     let new_slot = store.finalized_header.beacon().slot;
 
-    // 4. Execution state root at the new finalized header.
-    let exec = store
-        .finalized_header
-        .execution()
-        .expect("finalized header has no execution payload (pre-Capella or Gloas header)");
-    let exec_state_root = *exec.state_root();
-    let exec_block_number = *exec.block_number();
+    // 4. Execution state root at the new finalized header. Before Gloas: from the payload header in the
+    //    light-client header. Gloas: from the RLP witness, which must hash to execution_block_hash
+    //    (primitives/src/exec_header.rs; the host's dry run calls the same function).
+    let (exec_state_root, exec_block_number) = eth_bridge_primitives::exec_point(
+        &store.finalized_header,
+        exec_header_rlp.as_ref().map(|b| &b[..]),
+    )
+    .unwrap_or_else(|e| panic!("{}", e));
 
-    // 5. Vault deposits against that state root.
-    let (vault, deposits) = match vault_deposits {
+    // 5. Vault deposits and the token's blacklist against that state root.
+    let (vault, token, implementation, deposits) = match vault_deposits {
         Some(vd) => verify_vault_deposits(exec_state_root, vd),
-        None => (Address::ZERO, Vec::new()),
+        None => (Address::ZERO, Address::ZERO, Address::ZERO, Vec::new()),
     };
 
     let journal = Journal {
@@ -115,13 +121,25 @@ pub fn run<S: ConsensusSpec + serde::Serialize + serde::de::DeserializeOwned>() 
         exec_state_root,
         exec_block_number,
         vault,
+        token,
+        implementation,
         deposits,
     };
     env::commit_slice(&journal.encode());
 }
 
+/// Verify one account of the global state trie: key = keccak(address), value = rlp(TrieAccount).
+fn verify_account(state_root: B256, address: Address, account: &TrieAccount, mpt_proof: &[Bytes]) {
+    let address_hash = keccak256(address.as_slice());
+    let address_nibbles = Nibbles::unpack(Bytes::copy_from_slice(address_hash.as_ref()));
+    let mut rlp_account = Vec::new();
+    account.encode(&mut rlp_account);
+    proof::verify_proof(state_root, address_nibbles, Some(rlp_account), mpt_proof)
+        .unwrap_or_else(|e| panic!("account proof invalid for {address}: {e}"));
+}
+
 /// Verify one storage slot of an account: key = keccak(slot key), value = rlp(U256).
-/// A zero value is an absent key in the trie, so callers must never claim zero.
+/// A zero value is an absent key in the trie, so callers must never claim zero here.
 fn verify_slot(storage_root: B256, key: B256, value: U256, mpt_proof: &[Bytes]) {
     assert!(!value.is_zero(), "zero storage value: slot {key} is unset");
     let key_hash = keccak256(key.as_slice());
@@ -132,45 +150,58 @@ fn verify_slot(storage_root: B256, key: B256, value: U256, mpt_proof: &[Bytes]) 
         .unwrap_or_else(|e| panic!("storage proof invalid for slot {key}: {e}"));
 }
 
-fn verify_vault_deposits(execution_state_root: B256, vd: VaultDeposits) -> (Address, Vec<Deposit>) {
+/// Like `verify_slot`, but a zero value is verified as an exclusion proof (the key is absent).
+fn verify_slot_or_absent(storage_root: B256, key: B256, value: U256, mpt_proof: &[Bytes]) {
+    if !value.is_zero() {
+        return verify_slot(storage_root, key, value, mpt_proof);
+    }
+    let key_hash = keccak256(key.as_slice());
+    let key_nibbles = Nibbles::unpack(Bytes::copy_from_slice(key_hash.as_ref()));
+    proof::verify_proof(storage_root, key_nibbles, None, mpt_proof)
+        .unwrap_or_else(|e| panic!("exclusion proof invalid for slot {key}: {e}"));
+}
+
+fn verify_vault_deposits(execution_state_root: B256, vd: VaultDeposits) -> (Address, Address, Address, Vec<Deposit>) {
     assert!(!vd.deposits.is_empty(), "vault_deposits given but no deposits listed");
+    assert!(!vd.token.is_zero(), "token address is zero");
 
-    // Account node in the global state trie: key = keccak(address), value = rlp(TrieAccount).
-    let address_hash = keccak256(vd.vault.as_slice());
-    let address_nibbles = Nibbles::unpack(Bytes::copy_from_slice(address_hash.as_ref()));
-    let mut rlp_account = Vec::new();
-    vd.account.encode(&mut rlp_account);
-    proof::verify_proof(
-        execution_state_root,
-        address_nibbles,
-        Some(rlp_account),
-        &vd.account_proof,
-    )
-    .unwrap_or_else(|e| panic!("account proof invalid for {}: {e}", vd.vault));
+    // The vault account, then the token account, both in the global state trie at this root.
+    verify_account(execution_state_root, vd.vault, &vd.account, &vd.account_proof);
+    verify_account(execution_state_root, vd.token, &vd.token_account, &vd.token_account_proof);
+    let vault_root = vd.account.storage_root;
+    let token_root = vd.token_account.storage_root;
 
-    let storage_root = vd.account.storage_root;
+    // The token proxy's implementation: proven and committed; the covenant pins the value.
+    verify_slot(token_root, token_layout::IMPLEMENTATION_SLOT, vd.implementation_word, &vd.implementation_proof);
+    let implementation = Address::from_slice(&vd.implementation_word.to_be_bytes::<32>()[12..]);
+    assert!(!implementation.is_zero(), "implementation slot is zero");
+
     let mut out = Vec::with_capacity(vd.deposits.len());
     let mut last_nonce = 0u64;
     for d in vd.deposits {
         assert!(d.nonce > last_nonce, "deposit nonces must be strictly increasing and nonzero");
         last_nonce = d.nonce;
 
-        // deposits[nonce] word 0: amount | kaspaVersion << 64. Both words are proven
-        // against the vault's storage root at the finalized block.
-        verify_slot(storage_root, vault_layout::word0_key(d.nonce), d.word0, &d.word0_proof);
+        // deposits[nonce] words 0 and 1 against the vault's storage root at the finalized block.
+        verify_slot(vault_root, vault_layout::word0_key(d.nonce), d.word0, &d.word0_proof);
         verify_slot(
-            storage_root,
+            vault_root,
             vault_layout::word1_key(d.nonce),
             U256::from_be_bytes(d.payload.0),
             &d.payload_proof,
         );
-        let (amount, version) = vault_layout::decode_word0(d.word0)
-            .unwrap_or_else(|| panic!("deposit {} word 0 is not a Vault deposit: {}", d.nonce, d.word0));
+        let (amount, version, depositor) = vault_layout::decode_word0(d.word0)
+            .unwrap_or_else(|| panic!("deposit {} word 0 is not a UsdcVault deposit: {}", d.nonce, d.word0));
+
+        // The depositor's blacklist word in the token's storage: bit 255 is the flag. An absent key
+        // (zero word, exclusion proof) is a clear flag: the address never held the token.
+        verify_slot_or_absent(token_root, token_layout::blacklist_key(depositor), d.blacklist_word, &d.blacklist_proof);
+        let status = if token_layout::is_blacklisted(d.blacklist_word) { STATUS_SKIP } else { STATUS_MINT };
 
         let mut kaspa_spk = [0u8; 33];
         kaspa_spk[0] = version;
         kaspa_spk[1..].copy_from_slice(d.payload.as_slice());
-        out.push(Deposit { nonce: d.nonce, amount, kaspa_spk });
+        out.push(Deposit { nonce: d.nonce, amount, kaspa_spk, status });
     }
-    (vd.vault, out)
+    (vd.vault, vd.token, implementation, out)
 }

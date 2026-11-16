@@ -1,0 +1,8 @@
+# sha256  path   (release assets of the public repo; fixtures/FETCH.sh downloads and checks them)
+58a320be1755ee080d131dc5a76eefd4c86a3600e80004e36cd01ac3a11abbb3  outbound/kpow/sol/vectors-1h.json
+28ab17fd39647d78ab10c9e649daf8f27f230317861f3cc695c3dc7a4cac1efe  outbound/burnwitness/witness-o5-a.json
+92f379c1e6b5939a03de1884b893540fa57f81c543dcd22d52f8468a659b12ed  outbound/burnwitness/witness-o5-b.json
+6e6c1ec44f6e6417d60fa0c8911608372a8824edb1c02270a00db796ed19113b  outbound/burnwitness/witness-o5-floor.json
+7b807dfb06efcf3f6e4f856e58a81e534af219ff39a473017e59c13ebf84e737  outbound/burnwitness/witness-o5-p0.json
+4355badbb61662ff473e898963d4972af46cd31e7f8a3ba104dd4f21ccd81521  outbound/burnwitness/witness-u4.json
+4355badbb61662ff473e898963d4972af46cd31e7f8a3ba104dd4f21ccd81521  outbound/burnwitness/witnesses/witness-u4.json

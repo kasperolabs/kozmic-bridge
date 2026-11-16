@@ -1,6 +1,6 @@
 //! eth-prover: host for the Ethereum light-client guest.
 //!
-//!   eth-prover fetch   --network mainnet --consensus-rpc URL [--checkpoint 0x..] [--execution-rpc URL --vault 0x.. --nonce N]... --out inputs.cbor
+//!   eth-prover fetch   --network mainnet --consensus-rpc URL [--checkpoint 0x..] [--execution-rpc URL --vault 0x.. --token 0x.. --nonce N]... --out inputs.cbor
 //!   eth-prover execute --inputs inputs.cbor            # dev-mode run: cycle count + decoded journal, no proof
 //!   eth-prover prove   --inputs inputs.cbor --out dir  # real Groth16 receipt -> bundle for bin/r0spend.mjs
 //!   eth-prover fixture --dir <helios testdata dir> [--step N] [--execute|--prove --out dir]   # minimal-spec test vector, offline
@@ -19,7 +19,8 @@ use eth_bridge_methods::{
     ETH_BRIDGE_GUEST_MINIMAL_ID,
 };
 use eth_bridge_primitives::{
-    compute_chain_commitment, vault_layout, DepositProof, Journal, ProofInputs, VaultDeposits,
+    compute_chain_commitment, token_layout, vault_layout, DepositProof, Journal, ProofInputs, VaultDeposits,
+    STATUS_SKIP,
 };
 use helios_consensus_core::consensus_spec::{ConsensusSpec, MainnetConsensusSpec, MinimalConsensusSpec};
 use helios_consensus_core::types::{
@@ -40,6 +41,12 @@ use sha2::{Digest as _, Sha256};
 use std::path::PathBuf;
 use std::time::{Instant, SystemTime};
 use tree_hash::TreeHash;
+
+#[cfg(test)]
+mod adversarial;
+mod exec_header_rpc;
+#[cfg(test)]
+mod adversarial_gloas;
 
 #[derive(Parser)]
 #[command(about = "Ethereum light-client prover for the Kaspa ZK bridge")]
@@ -64,12 +71,24 @@ enum Cmd {
         /// Execution JSON-RPC (eth_getProof), only needed with --vault. Read it from a file, never paste the key.
         #[arg(long)]
         execution_rpc: Option<String>,
-        /// Vault.sol address whose deposits to prove
+        /// UsdcVault address whose deposits to prove
         #[arg(long)]
         vault: Option<String>,
+        /// The ERC-20 (USDC proxy) whose blacklist and implementation slot are proven; required with --vault
+        #[arg(long)]
+        token: Option<String>,
         /// Deposit nonces to prove, repeatable, strictly increasing
         #[arg(long)]
         nonce: Vec<u64>,
+        /// Gloas pack: override the Gloas fork epoch of --network (helios 0.12 has mainnet's as unscheduled).
+        /// It is part of the chain commitment, so it must be the epoch the covenant was built with.
+        #[arg(long)]
+        gloas_epoch: Option<u64>,
+        /// Sepia pack: keep the light-client store between steps in DIR, one file per finalized root. A file for
+        /// --checkpoint there replaces the bootstrap; the store after this step is written there for the next one.
+        /// Needed from Gloas on: no beacon node serves a bootstrap for a post-fork root (measured 2026-11-02).
+        #[arg(long)]
+        store_dir: Option<PathBuf>,
         #[arg(long, default_value = "inputs.cbor")]
         out: PathBuf,
     },
@@ -129,8 +148,8 @@ async fn main() -> Result<()> {
     dotenv::dotenv().ok();
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::Fetch { network, consensus_rpc, checkpoint, execution_rpc, vault, nonce, out } => {
-            fetch(&network, &consensus_rpc, checkpoint, execution_rpc, vault, nonce, &out).await
+        Cmd::Fetch { network, consensus_rpc, checkpoint, execution_rpc, vault, token, nonce, gloas_epoch, store_dir, out } => {
+            fetch(&network, &consensus_rpc, checkpoint, execution_rpc, vault, token, nonce, gloas_epoch, store_dir, &out).await
         }
         Cmd::Execute { inputs } => {
             let bytes = std::fs::read(&inputs).with_context(|| format!("read {}", inputs.display()))?;
@@ -178,7 +197,10 @@ async fn fetch(
     checkpoint: Option<String>,
     execution_rpc: Option<String>,
     vault: Option<String>,
+    token: Option<String>,
     nonces: Vec<u64>,
+    gloas_epoch: Option<u64>,
+    store_dir: Option<PathBuf>,
     out: &PathBuf,
 ) -> Result<()> {
     let network = match network.to_ascii_lowercase().as_str() {
@@ -188,7 +210,12 @@ async fn fetch(
         other => bail!("unknown network {other} (mainnet|sepolia|hoodi)"),
     };
     let base = network.to_base_config();
-    let forks = base.forks.clone();
+    let mut forks = base.forks.clone();
+    if let Some(e) = gloas_epoch {
+        let was = if forks.gloas.epoch == u64::MAX { "unscheduled".to_string() } else { forks.gloas.epoch.to_string() };
+        println!("gloas fork    : epoch {e} (override; {network:?} had {was}), version 0x{}", hex::encode(forks.gloas.fork_version));
+        forks.gloas.epoch = e;
+    }
     let genesis_root = base.chain.genesis_root;
     let genesis_time = base.chain.genesis_time;
 
@@ -222,13 +249,43 @@ async fn fetch(
         }
     };
 
-    let bootstrap: Bootstrap<MainnetConsensusSpec> = rpc
-        .get_bootstrap(checkpoint)
-        .await
-        .map_err(|e| anyhow!("GET bootstrap/{checkpoint}: {e} (node must serve light-client bootstrap for this root)"))?;
-    verify_bootstrap::<MainnetConsensusSpec>(&bootstrap, checkpoint, &forks).map_err(|e| anyhow!("bootstrap invalid: {e}"))?;
-    let mut store: LightClientStore<MainnetConsensusSpec> = LightClientStore::default();
-    apply_bootstrap::<MainnetConsensusSpec>(&mut store, &bootstrap);
+    // Sepia pack: the store at checkpoint_in. From DIR/<root>.cbor when an earlier step left it there, else from a
+    // bootstrap. The guest checks its header root and committee hash against the covenant either way, so a wrong
+    // file cannot be proven against; it fails here or in the guest.
+    let stored = store_dir.as_ref().map(|d| store_path(d, checkpoint)).filter(|p| p.exists());
+    let store: LightClientStore<MainnetConsensusSpec> = match &stored {
+        Some(p) => {
+            let bytes = std::fs::read(p).with_context(|| format!("read {}", p.display()))?;
+            let st: LightClientStore<MainnetConsensusSpec> =
+                serde_cbor::from_slice(&bytes).with_context(|| format!("decode {}", p.display()))?;
+            let root = st.finalized_header.beacon().tree_hash_root();
+            if root != checkpoint {
+                bail!("{} holds the store for {root}, not {checkpoint}", p.display());
+            }
+            if st.next_sync_committee.is_some() || st.best_valid_update.is_some() {
+                bail!("{} is not in bootstrap shape (next committee or best update set)", p.display());
+            }
+            println!("store in      : {} (persisted; no bootstrap fetched)", p.display());
+            st
+        }
+        None => {
+            let bootstrap: Bootstrap<MainnetConsensusSpec> = rpc.get_bootstrap(checkpoint).await.map_err(|e| {
+                anyhow!("GET bootstrap/{checkpoint}: {e} (node must serve light-client bootstrap for this root; \
+                         after Gloas no node does: start from a store saved by --store-dir)")
+            })?;
+            verify_bootstrap::<MainnetConsensusSpec>(&bootstrap, checkpoint, &forks)
+                .map_err(|e| anyhow!("bootstrap invalid: {e}"))?;
+            let mut store: LightClientStore<MainnetConsensusSpec> = LightClientStore::default();
+            apply_bootstrap::<MainnetConsensusSpec>(&mut store, &bootstrap);
+            if let Some(d) = &store_dir {
+                std::fs::create_dir_all(d).with_context(|| format!("create {}", d.display()))?;
+                std::fs::write(store_path(d, checkpoint), serde_cbor::to_vec(&store)?)?;
+            }
+            store
+        }
+    };
+    println!("store sha256  : {} (the same for a persisted store and a bootstrap of this root)",
+        hex::encode(Sha256::digest(serde_cbor::to_vec(&store)?)));
     let store_slot = store.finalized_header.beacon().slot;
     let store_period = calc_sync_period::<MainnetConsensusSpec>(store_slot);
     let fu_period = calc_sync_period::<MainnetConsensusSpec>(*finality_update.signature_slot());
@@ -246,7 +303,8 @@ async fn fetch(
     let expected_current_slot = helios_consensus_core::expected_current_slot(SystemTime::now(), genesis_time);
 
     // Host-side dry run of exactly what the guest will check, so a bad input fails here, not after proving.
-    {
+    // Its result, in bootstrap shape, is the store the next step starts from (--store-dir).
+    let next_store = {
         let mut s = store.clone();
         for (i, u) in sync_committee_updates.iter().enumerate() {
             verify_update::<MainnetConsensusSpec>(u, expected_current_slot, &s, genesis_root, &forks)
@@ -265,7 +323,24 @@ async fn fetch(
         if new_root == checkpoint {
             bail!("no progress: finality update finalizes checkpoint_in itself; wait for the next one");
         }
-    }
+        normalize_store(s)
+    };
+
+    // Gloas pack: the execution block of checkpoint_out, through the same function the guest calls.
+    let fh = finality_update.finalized_header();
+    let exec_header_rlp: Option<Vec<u8>> = match &fh {
+        helios_consensus_core::types::LightClientHeader::Gloas(h) => {
+            let rpc_url = execution_rpc.as_deref().ok_or_else(|| {
+                anyhow!("Gloas header: --execution-rpc is required (the execution header is a witness even without deposits)")
+            })?;
+            Some(exec_header_rpc::fetch_exec_header_rlp(rpc_url, h.execution_block_hash).await?)
+        }
+        _ => None,
+    };
+    let (exec_state_root, exec_block_number) =
+        eth_bridge_primitives::exec_point(&fh, exec_header_rlp.as_deref()).map_err(|e| anyhow!("{e}"))?;
+    println!("exec point    : block {exec_block_number} state root {exec_state_root}{}",
+        if exec_header_rlp.is_some() { " (Gloas witness)" } else { "" });
 
     // Optional vault deposits at the execution block of checkpoint_out.
     let vault_deposits = match (vault, execution_rpc) {
@@ -276,15 +351,11 @@ async fn fetch(
             if nonces.windows(2).any(|w| w[1] <= w[0]) || nonces[0] == 0 {
                 bail!("--nonce values must be nonzero and strictly increasing");
             }
-            let fh = finality_update.finalized_header();
-            let exec = fh
-                .execution()
-                .map_err(|_| anyhow!("finalized header has no execution payload (Gloas header): storage proofs need the execution-header witness path, not implemented yet"))?;
-            let block_number = *exec.block_number();
-            let state_root = *exec.state_root();
+            let (block_number, state_root) = (exec_block_number, exec_state_root);
             let vault_addr = v.parse::<Address>().context("--vault")?;
+            let token_addr = token.ok_or_else(|| anyhow!("--vault needs --token (the USDC proxy)"))?.parse::<Address>().context("--token")?;
             println!("exec block    : {block_number} state root {state_root}");
-            Some(fetch_vault_deposits(&rpc_url, vault_addr, &nonces, block_number).await?)
+            Some(fetch_vault_deposits(&rpc_url, vault_addr, token_addr, &nonces, block_number).await?)
         }
         (None, _) => None,
         (Some(_), None) => bail!("--vault needs --execution-rpc"),
@@ -298,17 +369,24 @@ async fn fetch(
         genesis_root,
         forks: forks.clone(),
         vault_deposits,
+        exec_header_rlp: exec_header_rlp.map(alloy_primitives::Bytes::from),
     };
     let bytes = serde_cbor::to_vec(&inputs)?;
     std::fs::write(out, &bytes)?;
+    if let Some(d) = &store_dir {
+        let p = store_path(d, fu_finalized_root);
+        std::fs::write(&p, serde_cbor::to_vec(&next_store)?)?;
+        println!("store out     : {} (the store after this step; the next fetch starts from it)", p.display());
+    }
     println!("chain commit  : {}", compute_chain_commitment(genesis_root, &forks));
     println!("wrote {} ({} bytes)", out.display(), bytes.len());
     Ok(())
 }
 
-/// One eth_getProof call for both words of every requested deposit, decoded with the vault
-/// layout on the host too, so a bad nonce fails here and not after proving.
-async fn fetch_vault_deposits(rpc_url: &str, vault: Address, nonces: &[u64], block_number: u64) -> Result<VaultDeposits> {
+/// Two eth_getProof calls at the same block: both words of every requested deposit against the vault, then the
+/// token's implementation slot and one blacklist word per depositor. Decoded on the host too, so a bad nonce,
+/// a wrong token or a blacklisted depositor is reported here and not after proving.
+async fn fetch_vault_deposits(rpc_url: &str, vault: Address, token: Address, nonces: &[u64], block_number: u64) -> Result<VaultDeposits> {
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct StorageProof { key: U256, value: U256, proof: Vec<alloy_primitives::Bytes> }
@@ -330,51 +408,88 @@ async fn fetch_vault_deposits(rpc_url: &str, vault: Address, nonces: &[u64], blo
         keys.push(vault_layout::word0_key(n));
         keys.push(vault_layout::word1_key(n));
     }
-    let body = serde_json::json!({
-        "jsonrpc": "2.0", "id": 1, "method": "eth_getProof",
-        "params": [vault, keys, format!("0x{block_number:x}")]
-    });
-    let resp: Rpc = reqwest::Client::new().post(rpc_url).json(&body).send().await?.json().await?;
-    let r = resp.result.ok_or_else(|| anyhow!("eth_getProof error: {:?}", resp.error))?;
-    if r.storage_proof.len() != keys.len() {
-        bail!("eth_getProof returned {} storage proofs for {} keys", r.storage_proof.len(), keys.len());
-    }
-    let find = |key: B256| -> Result<&StorageProof> {
+    let client = reqwest::Client::new();
+    let get_proof = |address: Address, keys: Vec<B256>| {
+        let client = client.clone();
+        async move {
+            let body = serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "eth_getProof",
+                "params": [address, keys, format!("0x{block_number:x}")]
+            });
+            let resp: Rpc = client.post(rpc_url).json(&body).send().await?.json().await?;
+            let r = resp.result.ok_or_else(|| anyhow!("eth_getProof({address}) error: {:?}", resp.error))?;
+            if r.storage_proof.len() != keys.len() {
+                bail!("eth_getProof({address}) returned {} storage proofs for {} keys", r.storage_proof.len(), keys.len());
+            }
+            Ok::<ProofResp, anyhow::Error>(r)
+        }
+    };
+    fn find(r: &ProofResp, key: B256) -> Result<&StorageProof> {
         r.storage_proof
             .iter()
             .find(|p| B256::from(p.key.to_be_bytes::<32>()) == key)
             .ok_or_else(|| anyhow!("eth_getProof result lacks key {key}"))
-    };
-    let mut deposits = Vec::with_capacity(nonces.len());
+    }
+    fn account_of(r: &ProofResp) -> TrieAccount {
+        TrieAccount { nonce: r.nonce.to::<u64>(), balance: r.balance, storage_root: r.storage_hash, code_hash: r.code_hash }
+    }
+
+    // 1. the vault: both words of every deposit
+    let rv = get_proof(vault, keys.clone()).await?;
+    let mut decoded = Vec::with_capacity(nonces.len());
     for &n in nonces {
-        let p0 = find(vault_layout::word0_key(n))?;
-        let p1 = find(vault_layout::word1_key(n))?;
-        let (amount, version) = vault_layout::decode_word0(p0.value)
-            .ok_or_else(|| anyhow!("deposit {n}: word 0 = {} is not a Vault deposit at block {block_number} (nonce not yet deposited, or wrong vault)", p0.value))?;
+        let p0 = find(&rv, vault_layout::word0_key(n))?;
+        let p1 = find(&rv, vault_layout::word1_key(n))?;
+        let (amount, version, depositor) = vault_layout::decode_word0(p0.value)
+            .ok_or_else(|| anyhow!("deposit {n}: word 0 = {} is not a UsdcVault deposit at block {block_number} (nonce not yet deposited, wrong vault, or a v1 Vault.sol record)", p0.value))?;
         if p1.value.is_zero() {
             bail!("deposit {n}: kaspa payload is zero at block {block_number}");
         }
-        let payload = B256::from(p1.value.to_be_bytes::<32>());
-        println!("deposit {n:<5} : amount {amount} kaspa_spk 0x{:02x}{}", version, hex::encode(payload));
+        decoded.push((n, amount, version, depositor, p0.value, p0.proof.clone(), B256::from(p1.value.to_be_bytes::<32>()), p1.proof.clone()));
+    }
+    println!("vault         : {vault} storage root {} account proof {} nodes", rv.storage_hash, rv.account_proof.len());
+
+    // 2. the token: implementation slot + one blacklist word per depositor
+    let mut tkeys = vec![token_layout::IMPLEMENTATION_SLOT];
+    for d in &decoded {
+        tkeys.push(token_layout::blacklist_key(d.3));
+    }
+    let rt = get_proof(token, tkeys).await?;
+    let pi = find(&rt, token_layout::IMPLEMENTATION_SLOT)?;
+    if pi.value.is_zero() {
+        bail!("token {token}: implementation slot is zero (not a ZeppelinOS proxy?)");
+    }
+    let implementation = Address::from_slice(&pi.value.to_be_bytes::<32>()[12..]);
+    let implementation_word = pi.value;
+    let implementation_proof = pi.proof.clone();
+    println!("token         : {token} implementation {implementation} storage root {} account proof {} nodes", rt.storage_hash, rt.account_proof.len());
+
+    let mut deposits = Vec::with_capacity(nonces.len());
+    for (n, amount, version, depositor, word0, word0_proof, payload, payload_proof) in decoded {
+        let pb = find(&rt, token_layout::blacklist_key(depositor))?;
+        let blacklisted = token_layout::is_blacklisted(pb.value);
+        println!("deposit {n:<5} : amount {amount} kaspa_spk 0x{:02x}{} depositor {depositor} -> {}", version, hex::encode(payload),
+            if blacklisted { "SKIP (blacklisted)" } else { "mint" });
         deposits.push(DepositProof {
             nonce: n,
-            word0: p0.value,
-            word0_proof: p0.proof.clone(),
+            word0,
+            word0_proof,
             payload,
-            payload_proof: p1.proof.clone(),
+            payload_proof,
+            blacklist_word: pb.value,
+            blacklist_proof: pb.proof.clone(),
         });
     }
-    println!("vault         : {vault} storage root {} account proof {} nodes", r.storage_hash, r.account_proof.len());
     Ok(VaultDeposits {
         vault,
-        account: TrieAccount {
-            nonce: r.nonce.to::<u64>(),
-            balance: r.balance,
-            storage_root: r.storage_hash,
-            code_hash: r.code_hash,
-        },
-        account_proof: r.account_proof,
+        account: account_of(&rv),
+        account_proof: rv.account_proof,
         deposits,
+        token,
+        token_account: account_of(&rt),
+        token_account_proof: rt.account_proof,
+        implementation_word,
+        implementation_proof,
     })
 }
 
@@ -492,9 +607,12 @@ fn print_journal(bytes: &[u8]) {
             println!("  exec_state_root  : {}", j.exec_state_root);
             println!("  exec_block_number: {}", j.exec_block_number);
             println!("  vault            : {}", j.vault);
+            println!("  token            : {}", j.token);
+            println!("  implementation   : {}", j.implementation);
             println!("  deposits         : {}", j.deposits.len());
             for d in &j.deposits {
-                println!("    nonce {} amount {} kaspa_spk 0x{}", d.nonce, d.amount, hex::encode(d.kaspa_spk));
+                println!("    nonce {} amount {} kaspa_spk 0x{} {}", d.nonce, d.amount, hex::encode(d.kaspa_spk),
+                    if d.status == STATUS_SKIP { "SKIP" } else { "mint" });
             }
         }
         None => println!("  (journal does not decode as our layout)"),
@@ -631,6 +749,7 @@ fn fixture_inputs(dir: &PathBuf, step: usize) -> Result<Vec<u8>> {
         genesis_root,
         forks,
         vault_deposits: None,
+        exec_header_rlp: None,
     };
     Ok(serde_cbor::to_vec(&inputs)?)
 }
@@ -665,6 +784,25 @@ fn fixture_forks(dir: &PathBuf) -> Result<Forks> {
         altair: fork("ALTAIR")?, bellatrix: fork("BELLATRIX")?, capella: fork("CAPELLA")?,
         deneb: fork("DENEB")?, electra: fork("ELECTRA")?, fulu: fork("FULU")?, gloas: fork("GLOAS")?,
     })
+}
+
+/// Sepia pack: a store in exactly the shape apply_bootstrap gives for its finalized root (helios 0.12
+/// consensus_core.rs): committee kept, everything a bootstrap does not carry reset. A persisted store and a
+/// bootstrap of the same root therefore serialize to the same bytes (fetch prints the sha256 of either).
+fn normalize_store<S: ConsensusSpec>(s: LightClientStore<S>) -> LightClientStore<S> {
+    LightClientStore {
+        optimistic_header: s.finalized_header.clone(),
+        finalized_header: s.finalized_header,
+        current_sync_committee: s.current_sync_committee,
+        next_sync_committee: None,
+        previous_max_active_participants: 0,
+        current_max_active_participants: 0,
+        best_valid_update: None,
+    }
+}
+
+fn store_path(dir: &PathBuf, root: B256) -> PathBuf {
+    dir.join(format!("{root}.cbor"))
 }
 
 fn parse_b256(s: &str) -> Result<B256> {

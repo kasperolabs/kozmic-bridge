@@ -1,0 +1,258 @@
+pragma silverscript ^0.1.0;
+
+// BRIDGE covenant v7 (sprint 7, 2026-11-15): v6 plus a KAS floor on every minted cell, and nothing else. Found by
+// reading kUSDT's open code (MIN_MINTED_VALUE in its BridgeMint.mint): v6's `advance` validates each minted cell's
+// state but never its KAS value, and `keepValue` lets the successor lose up to `max_fee` whatever the mints carry.
+// The proof and the journal are public once broadcast and `advance` takes no signature, so anyone could rebuild the
+// same advance with near-empty cells and take the rest of `max_fee` in an output of their own. v7:
+//   - one constructor int `cell_value` (sompi): every minted cell must carry at least this much KAS
+//     (`require(tx.outputs[cell].value >= cell_value)` in the STATUS_MINT branch);
+//   - `max_fee` is now the network fee ceiling alone: the successor keeps `input - max_fee - (the floors of the
+//     cells minted in this spend)` where v6 kept `input - max_fee` and left the split to the spender;
+//   - `init` keeps `input - max_fee - cell_value` and requires the authority's cell (output 1) to carry at least
+//     `cell_value`, so a stranger's init cannot leave the family's authority without KAS forever.
+// Set `--max-fee` tight at genesis: what a copier can still take per advance is `max_fee` minus the real fee.
+// Compiled with the same Gloas-masked inbound image id and chain commitment as v6. Everything below is v6's.
+//
+// BRIDGE covenant v6 (sprint 3, 2026-11-08): v5 with one change and nothing else, F5 of the 2026-11-02 review:
+// every deposit above the cursor must be the next nonce (`require(nonce == last_nonce + 1)` where v5 had
+// `nonce > last_nonce`), so a prover cannot skip a deposit; the inbound service always submits cursor + 1 onward,
+// blacklisted deposits included with status 1. Compiled with the Gloas-masked inbound image id
+// (GLOAS-GUEST.md section 7) and the chain commitment that image computes. Everything below is v5's.
+//
+// BRIDGE covenant v5: the Kaspa side of Kaspero Labs' USDC <-> Kaspa L1 bridge, rehearsal #2 (Tipsy.k,
+// docs/REHEARSAL-2-PLAN.md, 2026-10-17). v4 with two changes and nothing else: a per-deposit mint maximum
+// (`max_mint`, section 2.3: a status-0 entry above it makes the advance invalid; a skipped entry is not
+// compared) and the MinerDrip in the genesis (section 2.6: `init` has three outputs; output 2 is the miner
+// endowment, unbound; `tx.outputs.length == 2` becomes `tx.outputs.length == 3` with
+// `OpOutputCovenantId(2) == ZERO32`, which leaves output 1 the family's only member). Derived from
+// bridge-v4/bridge.sil by u7-apply.py; the header below
+// is v4's.
+//
+// BRIDGE covenant v4: the Kaspa side of Kaspero Labs' USDC <-> Kaspa L1 bridge (U3b, 2026-10-16).
+// v3 (inbound journal v2: token + implementation pins, status byte) with the token moved to
+// KCC-20 Last Call:
+//
+//   - the token cells are the unmodified reference KCC20 program (argent-lang/kcc20-reference
+//     c8a0871, template 9703112e…), byte-identical to any Studio-launched token; the mint
+//     path validates each recipient against that template with the cell prefix and suffix
+//     passed as arguments (the only family input is the authority, a different program);
+//   - the mint authority is BridgeMint (template dc96afcd…), a sibling program in the token's
+//     covenant family, the way the reference's own PublicMint is. It proves "a bridge input is
+//     present, I am the only family input, I continue unchanged, outputs 1..k are reference cells
+//     with sane schemes"; THIS contract decides the amounts and owners from the proof.
+//
+// One UTXO carries the light-client state of Ethereum (finalized header root, sync committee
+// hash), the deposit cursor (last UsdcVault nonce processed) and the covenant id of the token
+// family this instance mints (USDC.k). A spend advances that state only on a RISC Zero Groth16
+// proof (tag 0x20) that the pinned guest accepted a finality update from exactly this (header,
+// committee), and mints one reference cell per status-0 deposit beyond the cursor, to the Kaspa
+// address the depositor named on Ethereum. No keys, no admin path, no termination.
+//
+// Journal layout (docs/INBOUND-JOURNAL-V2.md, big-endian, 270 + 50n bytes): unchanged from v3.
+//   0 chain_commitment | 32 prev_header | 64 prev_committee | 96 new_header | 128 new_committee
+//   160 new_slot | 168 exec_state_root | 200 exec_block_number | 208 vault | 228 token
+//   248 implementation | 268 deposit_count | 270 deposits: nonce u64 | amount u64 | kaspa_spk 33 | status u8
+//
+// Lifecycle: genesis (token = 0) -> init (one tx: our successor at output 0, the BridgeMint
+// authority at output 1 as the genesis of a fresh covenant family; under KCC-23 the init tx also
+// spends the metadata preparation output, which authorizes output 1) -> advance (proof; zero
+// mints = heartbeat, the family is not touched).
+contract EthBridge(
+    byte[32] image_id,
+    byte[32] chain_commitment,
+    byte[20] vault,
+    byte[20] eth_token,
+    byte[20] eth_token_impl,
+    int max_fee,
+    int max_mint,                     // v5: the vault's MAX_DEPOSIT, base units; a status-0 entry above it is invalid
+    int cell_value,                   // v7: the KAS floor (sompi) of every minted cell and of the authority's cell at init
+    byte[32] kcc20_template,          // reference cell template 9703112e…
+    byte[32] bridge_mint_template,    // BridgeMint template dc96afcd…
+    byte[32] extension_commitment,    // the token's extension commitment (value per Silverscript answer)
+    byte[32] init_header,
+    byte[32] init_committee,
+    int init_cursor,
+    byte[32] init_token
+) {
+    byte[32] header = init_header;
+    byte[32] committee = init_committee;
+    int cursor = init_cursor;
+    byte[32] token = init_token;
+
+    // KCC-20 Last Call cell as the reference program encodes it: the generated route-template
+    // field first (the cell's own template hash), then the six spec fields. 145-byte window.
+    struct KCC20Cell {
+        byte[32] gen__kcc20_template;
+        int amount;
+        byte[32] owner;
+        byte owner_scheme;
+        byte borrow_scheme;
+        byte[32] borrow_guard;
+        byte[32] extension_commitment;
+    }
+
+    // BridgeMint state (field order = BridgeMint.sil). 132-byte window.
+    struct BridgeMintState {
+        byte[32] gen__kcc20_template;
+        byte[32] gen__bridge_mint_template;
+        byte[32] bridge_covenant_id;
+        byte[32] extension_commitment;
+    }
+
+    byte constant OWNER_P2PK_SCHNORR = 0x00;
+    byte constant OWNER_P2SH = 0x03;
+    byte constant BORROW_DISABLED = 0x00;
+    int constant MAX_DEPOSITS = 4;
+    int constant JOURNAL_FIXED_LEN = 270;
+    int constant DEPOSIT_LEN = 50;
+    int constant STATUS_MINT = 0;
+    int constant STATUS_SKIP = 1;
+    byte[32] constant ZERO32 = byte[32](0x0000000000000000000000000000000000000000000000000000000000000000);
+
+    function be64(byte[] j, int off) : int {
+        return int(byte[8](
+            j.slice(off + 7, off + 8) + j.slice(off + 6, off + 7) + j.slice(off + 5, off + 6) + j.slice(off + 4, off + 5)
+          + j.slice(off + 3, off + 4) + j.slice(off + 2, off + 3) + j.slice(off + 1, off + 2) + j.slice(off, off + 1)));
+    }
+
+    // v7: the successor keeps the input minus the fee ceiling minus what this spend is allowed to put into the
+    // family's cells (`allowance`: `cell_value` per minted cell, one `cell_value` for the authority at init).
+    function keepValue(int allowance) {
+        int out_idx = OpAuthOutputIdx(this.activeInputIndex, 0);
+        require(tx.outputs[out_idx].value >= tx.inputs[this.activeInputIndex].value - max_fee - allowance);
+    }
+
+    // init: bind this covenant to a fresh token family. Three outputs: our successor (0), the BridgeMint
+    // authority (1), and the miner endowment (2), which belongs to no covenant family. Output 1 must be a
+    // covenant genesis (no input carries its id); output 0 is this covenant's continuation and output 2
+    // must carry no binding, so with exactly three outputs the authority is the family's only member at
+    // birth: nobody can bring a second authority of the same token into existence. (OpCovOutputCount cannot
+    // say this: the engine keeps genesis outputs out of the covenant contexts, so it returns 0 for a family
+    // being born.) The bridge does not check that output 2 is a drip. Anyone may submit init; every valid
+    // init yields the same authority state, and the id is recorded once.
+    #[covenant.singleton(mode = transition)]
+    function init(State prev_state, byte[] bm_prefix, byte[] bm_suffix) : (State) {
+        require(prev_state.token == ZERO32);
+        require(tx.outputs.length == 3);
+        require(OpAuthOutputIdx(this.activeInputIndex, 0) == 0);
+        byte[32] new_token = OpOutputCovenantId(1);
+        require(new_token != ZERO32);
+        require(OpCovInputCount(new_token) == 0);
+        require(OpOutputCovenantId(2) == ZERO32);
+        validateOutputStateWithTemplate(
+            1,
+            BridgeMintState {
+                gen__kcc20_template: kcc20_template,
+                gen__bridge_mint_template: bridge_mint_template,
+                bridge_covenant_id: OpInputCovenantId(this.activeInputIndex),
+                extension_commitment: extension_commitment
+            },
+            bm_prefix,
+            bm_suffix,
+            bridge_mint_template
+        );
+        require(tx.outputs[1].value >= cell_value);   // v7: the authority's cell is never born without KAS
+        keepValue(cell_value);
+        return(State {
+            header: prev_state.header,
+            committee: prev_state.committee,
+            cursor: prev_state.cursor,
+            token: new_token
+        });
+    }
+
+    // advance: verify the proof, move the light-client state forward, mint every status-0
+    // deposit beyond the cursor as a reference cell, move the cursor past every deposit beyond
+    // it (minted or skipped).
+    #[covenant.singleton(mode = transition)]
+    function advance(State prev_state, byte[] journal, byte[] proof, byte[] kcc20_prefix, byte[] kcc20_suffix) : (State) {
+        require(journal.length >= JOURNAL_FIXED_LEN);
+
+        r0.g16.verify(sha256(journal), proof, image_id);
+
+        require(byte[32](journal.slice(0, 32)) == chain_commitment);
+        require(byte[32](journal.slice(32, 64)) == prev_state.header);
+        require(byte[32](journal.slice(64, 96)) == prev_state.committee);
+        require(byte[20](journal.slice(208, 228)) == vault);
+        require(byte[20](journal.slice(228, 248)) == eth_token);
+        require(byte[20](journal.slice(248, 268)) == eth_token_impl);
+
+        int n = int(byte[2](journal.slice(269, 270) + journal.slice(268, 269)));
+        require(journal.length == JOURNAL_FIXED_LEN + DEPOSIT_LEN * n);
+        require(n <= MAX_DEPOSITS);
+
+        // Each status-0 deposit beyond the cursor is the k-th family output, k = 1, 2, ...
+        // after the continuing authority at k = 0: a reference cell, borrow disabled, owned by
+        // the journal's recipient (version 0 -> p2pk-schnorr, version 8 -> p2sh; the 32-byte
+        // payload is the owner in both). A status-1 deposit gets no output; the cursor still
+        // moves past it.
+        int mints = 0;
+        int floors = 0;                     // v7: cell_value per minted cell, what keepValue allows this spend
+        int last_nonce = prev_state.cursor;
+        for (i, 0, n, MAX_DEPOSITS) {
+            int off = JOURNAL_FIXED_LEN + DEPOSIT_LEN * i;
+            int nonce = be64(journal, off);
+            if (nonce > prev_state.cursor) {
+                require(nonce == last_nonce + 1);   // v6 (F5): consecutive; a skipped deposit makes the advance invalid
+                int amount = be64(journal, off + 8);
+                require(amount > 0);
+                int version = int(byte[1](journal.slice(off + 16, off + 17)));
+                require(version == 0 || version == 8);
+                int status = int(byte[1](journal.slice(off + 49, off + 50)));
+                require(status == STATUS_MINT || status == STATUS_SKIP);
+                if (status == STATUS_MINT) {
+                    require(amount <= max_mint);
+                    int cell_idx = OpCovOutputIdx(prev_state.token, 1 + mints);
+                    require(tx.outputs[cell_idx].value >= cell_value);   // v7: the KAS floor of a minted cell
+                    validateOutputStateWithTemplate(
+                        cell_idx,
+                        KCC20Cell {
+                            gen__kcc20_template: kcc20_template,
+                            amount: amount,
+                            owner: byte[32](journal.slice(off + 17, off + 49)),
+                            owner_scheme: version == 8 ? OWNER_P2SH : OWNER_P2PK_SCHNORR,
+                            borrow_scheme: BORROW_DISABLED,
+                            borrow_guard: ZERO32,
+                            extension_commitment: extension_commitment
+                        },
+                        kcc20_prefix,
+                        kcc20_suffix,
+                        kcc20_template
+                    );
+                    mints = mints + 1;
+                    floors = floors + cell_value;
+                }
+                last_nonce = nonce;
+            }
+        }
+
+        if (mints == 0) {
+            // Heartbeat shape (also a journal of only skipped deposits): the family is not
+            // touched at all, so the authority can neither be retired nor moved under cover of
+            // a plain advance.
+            require(OpCovInputCount(prev_state.token) == 0);
+            require(OpCovOutputCount(prev_state.token) == 0);
+        } else {
+            // Exactly one family input (the authority) and exactly 1 + mints family outputs:
+            // the authority continuing unchanged, then the recipients validated above, in
+            // journal order. BridgeMint checks the same shape from its side; this contract
+            // decides what the recipient states are.
+            require(prev_state.token != ZERO32);
+            require(OpCovInputCount(prev_state.token) == 1);
+            require(OpCovOutputCount(prev_state.token) == 1 + mints);
+            int auth_in = OpCovInputIdx(prev_state.token, 0);
+            int auth_out = OpCovOutputIdx(prev_state.token, 0);
+            require(tx.outputs[auth_out].scriptPubKey == tx.inputs[auth_in].scriptPubKey);
+        }
+
+        keepValue(floors);
+
+        return(State {
+            header: byte[32](journal.slice(96, 128)),
+            committee: byte[32](journal.slice(128, 160)),
+            cursor: last_nonce,
+            token: prev_state.token
+        });
+    }
+}

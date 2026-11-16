@@ -1,379 +1,188 @@
-# Kozmic
+# Kozmic Bridge
 
-**Kaspa L1 reads Ethereum.** A covenant on Kaspa holds a light client of Ethereum: it knows,
-from a zero-knowledge proof of what Ethereum's own validators finalized, what is true on Ethereum,
-and acts on it. The first thing it does with that knowledge is a trustless bridge: tokens
-deposited into a contract on Ethereum appear as KCC-20 tokens on Kaspa. No custodian, no multisig,
-no relayer with keys, no admin. Live on mainnet since 2026-10-12.
+**USDC between Ethereum and Kaspa L1, both ways, checked by proofs instead of people.** A deposit into a
+vault on Ethereum becomes the same amount of `kzUSDC` on Kaspa; a burn of `kzUSDC` on Kaspa releases
+USDC on Ethereum. In each direction the receiving chain verifies a zero-knowledge proof of what the
+other chain did: Kaspa verifies Ethereum's own finality (its sync committee signatures), and Ethereum
+verifies Kaspa's proof of work and its blockDAG ordering. No custodian, no multisig, no signers, no
+admin key, no pause button. The programs cannot be changed after deployment; a flaw means a new bridge,
+never a patch to the old one.
 
-> **Status: Kaspa reads Ethereum; Ethereum cannot read Kaspa yet.** What runs today bridges KBT, a
-> self-minted test ERC-20 with no value, from Ethereum to Kaspa. Tokens cannot go back: the
-> Ethereum vault has no withdraw function. See [What it does not do (yet)](#what-it-does-not-do-yet).
+Live on mainnet, both directions, since 2026-11-16 (instance 2). Instance 1 ran the same code with real
+USDC from 2026-11-15 as the final rehearsal, settled every transfer, and was closed to deposits on
+2026-11-16 (its holders can still exit).
 
-## What happened on 2026-10-13
+> New and not audited by a paid firm. Move only what you can afford to lose; nobody can reverse a
+> transfer, including us. Read [RISKS.md](RISKS.md) before using it. The user guide is
+> [docs/GUIDE.md](docs/GUIDE.md), the plain-language terms are [docs/TERMS.md](docs/TERMS.md).
 
-At 00:35:23 UTC we deposited 0.5 KBT into the vault on Ethereum, naming a Kaspa address as
-the recipient, and then did nothing else. Eighteen and a half minutes later the token was on Kaspa:
+## The live instance
 
-| step | when (UTC) | evidence |
-|---|---|---|
-| deposit #3 into the vault on Ethereum: 0.5 KBT to `kaspa:qpdlx5hl9z6c6twxqwyf8u6yxpg885p8lpa2er363q95m009zl4w629zj9juj` | 00:35:23 | [tx `0x29e6f6a8…`](https://etherscan.io/tx/0x29e6f6a874164b38c556abd32dbcfb3adc262e06238b46bfb8f3ce4107a419b0), block 26,180,018 |
-| Ethereum finalizes the block (sync committee signs a finalized beacon header covering it) | ~00:49 | finalized header `0x0d3f1e43…3a2b`, committed in the proof's journal |
-| the prover service notices, rents a GPU for 164 s, proves, wraps the proof to Groth16 | 00:49 to 00:53 | bundle [`eth-prover/out-deposit-3/`](eth-prover/out-deposit-3) |
-| the Kaspa covenant verifies the proof on chain and mints 0.5 KBT to the named address | 00:53:52 | [Kaspa tx `568bedc5…`](https://explorer.kaspa.org/txs/568bedc542e6ed51ce6ecbbef0968a730d43b049f95150d37960ca7a86f44aaf) |
+| | |
+|---|---|
+| token | `kzUSDC` (ticker `KZUSDC`), a KCC-20 token on Kaspa mainnet. Its identity is the covenant family id below, not the name |
+| token family (Kaspa) | `cc9957fe0d485f79994ed583aa7e16bacf194d9b9d6d77aeedc129349ddad12c` |
+| bridge covenant (Kaspa) | `bf6901190501d55274375960c4f119f6b5e8cbc933192838f4a1ffaed85b7158`, address `kaspa:ppsq6j9qhp3774c9rr4ene82qqzc8v4hec97jz8x2zsfetm465hc2f748x8nw` |
+| vault (Ethereum) | [`0x1B9f6750d8b9776Ed9128DC48A7537019ecB2243`](https://etherscan.io/address/0x1B9f6750d8b9776Ed9128DC48A7537019ecB2243) (`UsdcVaultV4.sol`) |
+| relay (Ethereum) | [`0xF626DcC984d12445ABdDAADA989855E66d3cDB3A`](https://etherscan.io/address/0xF626DcC984d12445ABdDAADA989855E66d3cDB3A) (`KaspaRelayV5.sol`) |
+| factory (Ethereum) | `0x3749f442F27d195f34219E668058E151C29c16E2` (`RelayFactoryV3.sol`), creation tx [`0xe767fe1a…`](https://etherscan.io/tx/0xe767fe1ad0486d1b7f59f03dda0c1eb2b7f28a27074bd7189597260490a4d222), block 26,427,414 |
+| inbound guest (Ethereum finality, verified on Kaspa) | image id `c320da505b41ffb3336a5bd4d995ead15590b75f4cb4b1ae3fa25353bacb955c` |
+| outbound guest (Kaspa PoW and DAG, verified on Ethereum) | image id `c61fd96588598d7f9b2a16aae765932ea3648177f42ddb167370f18f7d9a97f2` |
+| every parameter and transaction | [`usdc/deployments/2-0xF626DcC984d12445ABdDAADA989855E66d3cDB3A.json`](usdc/deployments) |
 
-Total cost of that mint: about $0.05 of rented GPU time and 0.33 KAS in Kaspa fees, plus 1 KAS
-that travels with the token output (Kaspa's storage-mass rule). Every other mainnet transaction
-of this bridge, including the rejected replays, is listed in [`bridge/README.md`](bridge/README.md#mainnet-record).
+The parameters you will feel: deposits take about 25 minutes (Ethereum finality plus one proof); an exit
+of up to about $1,200 takes about 90 minutes, and larger exits wait in proportion to the amount, because
+the proof must carry more of Kaspa's work for them. The vault holds at most a cap that starts small and
+doubles on a schedule, and exits are paid at most a fixed amount per proof and per day. The page shows
+the live figures, read from the contracts; this README does not repeat numbers that the contracts own.
 
 ## How it works
 
 ```
- Ethereum                          prover (anyone can run it)              Kaspa L1
- --------                          -------------------------               --------
- Vault.sol                         1. read the light-client data           BRIDGE covenant
-   deposit(amount, kaspa address)     Ethereum's validators signed           state: last trusted Ethereum
-   stores (nonce, amount, address) 2. run the RISC Zero program:                    header + its validator set,
-   no owner, no withdraw              - verify the validators' signatures         last minted deposit nonce
-                                      - verify the deposit is in the       advance(journal, proof):
-                                        finalized Ethereum state             - verify the Groth16 proof
-                                      - publish a journal: old header,       - journal must start from the
-                                        new header, deposits                   state it holds
-                                   3. wrap the proof to Groth16            - mint each new deposit to the
-                                      (128 bytes)                              address in the journal
-                                   4. submit it to Kaspa                   KCC-20 token (KBT on Kaspa)
+ Ethereum                      provers (anyone; Kaspero runs one)                 Kaspa L1
+ --------                      ----------------------------------                 --------
+ UsdcVaultV4                   in:  prove Ethereum's finalized state            BRIDGE covenant (bridge-v7)
+   deposit(amount, kaspa spk)       (sync committee BLS, storage proofs)          verifies the Groth16 proof with
+   records (nonce, amount, spk)     -> journal: old header, new header,           OpZkPrecompile, continues from
+   no owner, no withdraw               deposits                                   its own header, mints kzUSDC
+                                                                                 to the address in the journal
+ KaspaRelayV5                  out: prove Kaspa's work after the burn
+   submit(seal, journal, rlp)       (headers, PoW, GHOSTDAG ordering,            burn = kzUSDC transfer to the
+   verifies the proof via the       the attestation ladder)                       burn owner, payload names the
+   RISC Zero router, pays the       -> journal: burn txids, amounts,              Ethereum recipient and a
+   recipient from the vault,        recipients, attesting superblocks,           recent Ethereum block as the
+   pays the prover the tip          the Ethereum beacon it is bound to           clock
 ```
 
-1. **Deposit.** `Vault.sol` takes the ERC-20 and records `(nonce, amount, Kaspa address)` in its
-   storage. It has no owner and no other function: whatever enters stays.
-2. **Finality.** Ethereum finalizes the block in 13 to 30 minutes. A rotating committee of 512
-   validators (the sync committee) signs the finalized header. This is the data Ethereum's own
-   light clients use, and it is self-verifying: a forged update fails the signature check.
-3. **Proof.** A RISC Zero program (`eth-prover/`, a port of RISC Zero's audited
-   [r0vm-helios](https://github.com/risc0/r0vm-helios) on top of a16z's
-   [Helios](https://github.com/a16z/helios)) checks the committee's BLS signatures, follows any
-   committee rotations, and checks Merkle-Patricia proofs that the vault's storage holds the
-   deposit at the finalized state root. Its output, the journal, is 230 bytes plus 49 per deposit.
-   The proof is wrapped into a 128-byte Groth16 proof.
-4. **Mint.** The Kaspa covenant (`bridge/bridge.sil`, Silverscript) verifies the proof with
-   Kaspa's `OpZkPrecompile` against a pinned program id, then checks that the journal continues
-   exactly from the header and committee it holds, names Ethereum mainnet and this vault, and
-   mints one KCC-20 output per deposit it has not minted before, to exactly the address the
-   depositor named. The successor covenant carries the new state.
+**Ethereum to Kaspa.** The vault records the deposit. When Ethereum finalizes the block, a RISC Zero
+program ([`eth-prover/`](eth-prover), on RISC Zero's audited r0vm-helios and a16z's Helios) verifies the
+sync committee's signatures on the finality update and Merkle-Patricia proofs that the vault's storage
+holds the deposit. The Kaspa covenant verifies the Groth16 proof against the pinned image id, checks
+that the journal continues from the header and committee it holds, and mints one KCC-20 cell per new
+deposit to the address the depositor named. The successor covenant carries the new state.
+
+**Kaspa to Ethereum.** The user burns `kzUSDC`: a KCC-20 transfer to the burn owner, carrying the
+Ethereum recipient and a recent Ethereum block hash as a clock. A RISC Zero program
+([`outbound/kaspa-prover/`](outbound/kaspa-prover)) verifies the Kaspa headers from the burn's block
+forward: proof of work, parent links, GHOSTDAG blue work, and a ladder of "attesting" superblocks (blocks
+whose PoW hash clears a much higher difficulty than required; their count measures how much work the
+network did after the burn). The relay verifies the proof, checks that enough attesting work has
+accumulated for the amount and the time elapsed, and pays the recipient from the vault, less the fee.
+The relay's rule is `required = max(FLOOR, time term, amount / ATTEST_UNIT)`; the design and the forger
+odds behind FLOOR are in [`docs/V4-DESIGN.md`](docs/V4-DESIGN.md) and the review documents under
+`docs/`.
 
 Why nobody can cheat:
 
-- **A proof from another program** fails: the covenant pins the program's image id
-  (`4756d736…`).
-- **A proof that skips or invents Ethereum history** fails: the covenant pins the last finalized
-  header *and* the hash of the validator committee that must sign the next one, so a prover cannot
-  pick its own committee.
-- **A replayed proof** fails: its starting header is no longer the covenant's state (tested on
-  mainnet, rejected by the node).
-- **Front-running** gains nothing: the recipient is part of the proven journal, and the covenant
-  enforces it.
-- **A double mint** fails: the covenant keeps a deposit cursor; deposits at or below it are skipped.
-- **A malicious prover** can at most stall the bridge, never move or create tokens. The prover
-  holds no keys.
+- a proof from another program fails: both chains pin the image ids;
+- a forged Ethereum history fails: the covenant pins the last header *and* the committee that must sign the next;
+- a forged Kaspa history must outwork the real network for the whole attestation window: at FLOOR 600
+  a forger with 30% of Kaspa's hashrate has odds of about one in a billion per year of succeeding
+  once (`docs/V4-DESIGN.md`, the first-passage tables);
+- replays fail (the covenant's header moves; the relay records each burn txid);
+- front-running gains nothing: the recipient is inside the proven journal on both sides;
+- a malicious prover can at most refuse to work; it holds no keys and no funds.
 
-## What it does not do (yet)
+## What you trust
 
-- **No way back.** Redeeming KBT on Kaspa for the ERC-20 on Ethereum needs Ethereum to verify a
-  proof of Kaspa's consensus (PoW and GHOSTDAG) that a burn happened. Nobody has built such a proof
-  yet; the research has started.
-  The current vault cannot release anything, by design, and never will.
-- **Test token only.** The vault accepts KBT, a test ERC-20 with no value. A capped USDC instance
-  is planned after the redemption design is settled.
-- **No cap on the vault.** Its only limit is that it accepts KBT and nothing else.
-- **Wallet display.** The token is Silverscript's covenant-state KCC-20 (`kcc20.sil`). Wallets
-  that do not recognize its template (Kasla, today) do not show it, though it exists and is
-  spendable.
-- **Latency is Ethereum's finality**, 15 to 35 minutes, plus a few minutes of proving. There is no
-  fast path, and there will not be one inside the bridge itself.
-- **Ethereum's next fork (Glamsterdam, "Gloas")** changes the light-client header format. This
-  program reads the execution state root from it and will need a new version, which means a new
-  covenant instance.
+Ethereum's sync committee (two thirds of 512 validators, the assumption every Ethereum light client
+makes); Kaspa's proof of work (a forger needs a majority of the hashrate for hours); RISC Zero's proof
+system, its Groth16 trusted setup and its on-chain verifier router; the code in this repository; and
+that the image ids pinned on both chains were built from this source, which you can reproduce below.
 
-## What reading Ethereum is good for, even one way
-
-The light client is the product; the token bridge is its first use. Anything provable from
-Ethereum's finalized state can become a condition a Kaspa covenant acts on, and none of these need
-a way back:
-
-- **Pay on Ethereum, receive on Kaspa.** A vault that forwards each payment to a seller's Ethereum
-  address (instead of locking it) and records it; a covenant on Kaspa releases what was bought: a
-  token allocation, access, an asset. Checkout in the stablecoin the buyer already holds, delivery
-  on Kaspa, no custody anywhere.
-- **Migration.** A project moving its token from Ethereum to Kaspa for good wants exactly a one-way
-  door.
-- **Ethereum facts as Kaspa conditions.** "Release this escrow if that address paid", "settle on that
-  on-chain outcome": the same program, different storage slots.
-
-## How this differs from other Kaspa bridges
-
-Bridges make different trade-offs, and saying which one you are is more useful than claiming to be
-the best:
-
-| | most bridges today | Kozmic |
-|---|---|---|
-| who approves a transfer | a committee or multisig signs messages | Kaspa L1 verifies a proof of Ethereum's own consensus |
-| what you trust | the signers and their key security | Ethereum's sync committee, RISC Zero, the code here |
-| who can pause or change it | the operators | nobody; the covenant is immutable and has no admin |
-| where the tokens live | often an L2 or a sidechain | Kaspa L1, as KCC-20 covenant UTXOs |
-| assets and directions | many, two-way | one test token, Ethereum to Kaspa only |
-| speed | minutes | Ethereum finality plus proving, ~18 minutes |
-
-A committee-secured bridge is faster to extend and can go both ways today; a proof-secured one is
-narrower and slower but removes the people in the middle. Both can exist side by side.
-
-## Trust assumptions
-
-You trust: Ethereum's sync committee (two thirds of 512 validators, the same assumption every
-Ethereum light client makes); RISC Zero's proof system and its Groth16 trusted setup; the code
-of the vault, the program and the covenant, all in this repository; that the program id pinned on
-Kaspa (`4756d736…`) was built from this source (reproduce it, below).
-
-You do not trust: us, the prover operator, the beacon or RPC endpoints the prover reads from, or
-anyone holding a key. There are no keys.
+You do not trust Kaspero Labs, the prover operator, the RPC endpoints a prover reads from, or anyone
+holding a key. Circle can freeze the Ethereum vault under USDC's own terms; that is outside this
+system and discussed in [RISKS.md](RISKS.md).
 
 ## Verify it yourself
 
-**On chain.** The Ethereum deposit and vault are on Etherscan. On Kaspa, read transactions from a
-node (explorers only partly decode Kaspa's v1 transactions with covenants yet). The bridge is
-covenant id `ac21e83194b0beb1ae8c932a4734984f692ab982f6739037af6f979aef0dea0b`, the token is
-covenant id `87b503510d715acfa3cca82f245e696593c30d78dde70e11e69afa88b3d03a3f`.
+**The contracts.** The vault, relay and factory are verified on Etherscan; compare the source with
+[`usdc/src/`](usdc/src). `forge test` in `usdc/` runs the unit and fork tests, including the real
+RISC Zero router on a mainnet fork.
 
-**The proof, locally, without spending anything.** `bridge/` runs the real rusty-kaspa 2.1.0
-script engine over the real mainnet proofs: valid spends accepted, replays, wrong recipients,
-inflated amounts, foreign programs and flipped journal bytes rejected.
+**The covenant and the token.** [`bridge-v7/`](bridge-v7) compiles the Silverscript covenant and runs
+real mainnet proofs through the real rusty-kaspa 2.1.0 script engine (`cargo test --release` there).
+Kascov and Studio show the token's KCC-23 declaration and the `BridgeMint` authority; the authority's
+artifact hash is reproduced by `bin/minter-artifact.py` from `bridge-v7/BridgeMint.*`.
 
-```
-cd bridge && cargo test --release -- --test-threads=1
-```
-
-**The journal of any proof:**
+**The program ids.** The ids pinned on chain come from the Docker builds; reproducing them is the
+check no explorer can do for you. Without a GPU, from a clean checkout (x86_64, Docker, under an hour
+each):
 
 ```
-cd eth-prover && cargo build --release
-./target/release/eth-prover journal --file out-deposit-3/journal.hex
+cd eth-prover            && docker build -f docker/Dockerfile.cuda --target ids --output type=local,dest=. . && cat IMAGE_IDS.txt
+cd outbound/kaspa-prover && docker build -f docker/Dockerfile.cuda --target ids --output type=local,dest=. . && cat IMAGE_IDS.txt
 ```
 
-**The program id.** The id pinned on Kaspa comes from the Docker build below. Reproducing it is
-the one check no explorer can do for you: build the image, print the id, compare it with
-`4756d736…` and with `image_id.hex` in any bundle under `eth-prover/out-*/`.
+Compare with the two ids in the table above and with `IMAGE_ID()` on the relay and the id in the
+covenant's state. The pinned toolchain (risc0-zkvm 3.0.4, whose Groth16 control root Kaspa's SDK 2.1.0
+embeds; the guest Rust toolchain; patched accelerated crates) is in the Dockerfiles. A different
+toolchain builds a different program with a different id, which the chains reject.
 
-Without a GPU, from a clean checkout (x86_64, Docker, about 40 minutes from an empty cache):
+**The journal of any proof.** `eth-prover journal --file <journal.hex>` and
+`kaspa-prover journal --file <journal.hex>` decode the frozen layouts (`*/primitives/src/lib.rs`).
 
-```
-cd eth-prover
-docker build -f docker/Dockerfile.cuda --target ids --output type=local,dest=. .
-cat IMAGE_IDS.txt   # eth-bridge-guest (mainnet spec) image id: 4756d736d00cc0e5b813fd9bbb8fe586dbfe9cee524e61e79335cc2585413a50
-```
+## Run a prover, or rescue your own funds
 
-Verified 2026-10-13 with a fresh BuildKit builder and no cache. The command also prints the id of a
-minimal-spec test program; only the mainnet id above matters for the live covenant.
+Anyone can prove. The relay pays the proof's tip to the Ethereum address inside the journal, and the
+covenant mints for whoever brings a valid proof; neither needs permission. If Kaspero's prover stopped
+tomorrow, these two scripts do by hand what it does in a loop, with your own GPU:
 
-## Docker: the pinned toolchain
+- [`bin/prove-exit.sh`](bin/prove-exit.sh): prove one burn and submit it to the relay (Kaspa to Ethereum);
+- [`bin/prove-deposit.sh`](bin/prove-deposit.sh): prove a finality update and advance the covenant (Ethereum to Kaspa).
 
-The prover depends on exact versions that must agree with each other and with Kaspa:
-`risc0-zkvm 3.0.4` (the version whose Groth16 control root Kaspa's SDK 2.1.0 embeds), the guest
-Rust toolchain 1.94.1, patched crates pinned in `Cargo.lock`, and accelerated BLS12-381, SHA-2 and
-Keccak forks. Installing this by hand is possible (`eth-prover/README.md`) but easy to get subtly
-wrong: a different toolchain builds a different program with a different id, which the covenant
-rejects. **Use the image.**
-
-```
-docker pull kasperolabs/eth-prover:cuda
-```
-
-| | |
-|---|---|
-| Dockerfile | [`eth-prover/docker/Dockerfile.cuda`](eth-prover/docker/Dockerfile.cuda) |
-| build it yourself | `cd eth-prover && docker build -f docker/Dockerfile.cuda -t kasperolabs/eth-prover:cuda .` (x86_64, no GPU needed, ~30 min first build) |
-| what it contains | `eth-prover` built with CUDA kernels for sm_80, sm_86, sm_89, sm_90 (A100, RTX 30xx, RTX 40xx / L40S / L4, H100); sshd for rented GPU machines |
-| what it is used for | `eth-prover prove --no-wrap` on a GPU: ~2 s per million cycles on an RTX 4090 or L40S; a plain step is ~55M cycles |
-| what runs elsewhere | the Groth16 wrap (`eth-prover wrap`, 71 s on CPU) uses RISC Zero's own `risczero/risc0-groth16-prover` image on any x86_64 Docker host |
-| image id it produces | `4756d736d00cc0e5b813fd9bbb8fe586dbfe9cee524e61e79335cc2585413a50` |
-
-No GPU of your own? The prover service rents one per proof through the Runpod API and deletes it
-when the proof is done: a few cents per proof (`bin/bridge-prover.mjs`).
-
-## Run a prover
-
-Anyone can run one; it holds no keys and cannot mint anything a valid proof does not carry. Every
-60 seconds it reads Ethereum's latest finalized header and the vault's deposit counter. When a new
-deposit is final, it proves and submits; when nothing happens for a week, it submits a heartbeat so
-the covenant keeps up with Ethereum's validator rotations.
-
-### What every prover needs
-
-- An x86_64 Linux machine with Docker and Node 20. It wraps proofs to Groth16 on the CPU (71 s,
-  RISC Zero's `risczero/risc0-groth16-prover` image, pulled automatically).
-- This repository, with `eth-prover` and `bridge` built (`cargo build --release` in each; Rust
-  stable, plus `rzup install rust 1.94.1` and `rzup install r0vm 3.0.4` from
-  [risczero.com/install](https://risczero.com/install)). These host builds fetch data, decode
-  journals and build Kaspa transactions; the proof itself always comes from the Docker image.
-- A Kaspa node (rusty-kaspa 2.1.0 or later, Toccata active) with its wRPC Borsh port open to the
-  prover and `--utxoindex`.
-- An Ethereum execution RPC that serves `eth_getProof`. A free Alchemy or Infura key works. Put the
-  full URL in `eth-rpc-url.txt` in the repository root (`chmod 600`; it is git-ignored and the
-  service redacts it from its logs). No Ethereum node: beacon data comes from public light-client
-  endpoints and is verified by signature.
-- The bridge state file, `bridge-cp6-state.json`, in the repository root. For the live mainnet
-  instance, copy [`deployments/kaspa-mainnet-bridge-ac21e831.json`](deployments) and make sure it
-  matches the covenant's current state on chain (two provers advancing one covenant from stale
-  state files will see each other's transactions as "input not found").
-- A GPU, in one of the two modes below.
-
-### Mode 1: your own NVIDIA GPU (`--gpu local`)
-
-Needs the NVIDIA driver and the [NVIDIA Container
-Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html),
-so that this works:
-
-```
-docker run --rm --gpus all kasperolabs/eth-prover:cuda nvidia-smi
-```
-
-Supported cards: RTX 30xx, RTX 40xx, A100, L40S, L4, H100 and similar (sm_80 and newer), 24 GB of
-VRAM recommended. Then:
-
-```
-pm2 start "node bin/bridge-prover.mjs --url ws://127.0.0.1:17110 --gpu local" --name bridge-prover
-```
-
-Cost: electricity. A plain proof is about 2 minutes on an RTX 4090; a weekly heartbeat about 11.
-This mode runs the same image and command as the pods, but has not yet driven a mainnet advance
-itself; every mainnet proof so far came from Mode 2.
-
-### Mode 2: rented GPU per proof (`--gpu runpod`, the default)
-
-For a machine without a GPU. The service creates a GPU pod on [Runpod](https://www.runpod.io)
-through its REST API, proves, copies the result back over SSH and deletes the pod, every time.
-One-time setup:
-
-1. Create a Runpod account and add a **small prepaid balance** ($10 is months of proofs). Leave
-   automatic top-up off: the balance is your hard spending cap.
-2. In the console, open **Settings, API Keys** ([console.runpod.io/user/credentials](https://console.runpod.io/user/credentials)),
-   click **Create API Key**, permission **All**, and copy the key (it is shown once).
-3. On the prover machine, save it without leaving it in your shell history:
-   ```
-   read -rs RP && printf '%s' "$RP" > runpod-api-key.txt && chmod 600 runpod-api-key.txt && unset RP
-   curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $(cat runpod-api-key.txt)" https://rest.runpod.io/v1/pods   # 200
-   ```
-4. Make sure the machine has an SSH key (`ls ~/.ssh/id_ed25519.pub || ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519`).
-   The service hands its public half to each pod at creation; nothing to configure in Runpod.
-
-Then:
-
-```
-pm2 start "node bin/bridge-prover.mjs --url ws://127.0.0.1:17110" --name bridge-prover --kill-timeout 20000
-```
-
-Measured on mainnet: pod ready in 1 to 5 minutes (image pull), proof in about 2, pod deleted
-right after; $0.05 to $0.11 per proof, about $0.25 for a weekly heartbeat. Pods are named
-`bridge-prover-*`; any such pod still alive between proofs is deleted on the next tick.
-
-### Try it without spending anything
-
-```
-node bin/bridge-prover.mjs --once --dry-run --force heartbeat
-```
-
-Fetches the light-client data from the covenant's current header, runs the program in dev mode,
-checks the journal continues from the covenant's state, and prints the cycle count. No GPU, no
-transaction. Log events and costs: [`bridge/README.md`](bridge/README.md#the-prover-service).
-
-## Numbers
-
-| | |
-|---|---|
-| deposit to mint | 18.5 min measured (13.8 min Ethereum finality, 4.5 min proving and submitting) |
-| proof size on Kaspa | 128-byte Groth16 proof, journal 230 + 49 bytes per deposit |
-| Kaspa compute budget | 1553 heartbeat, 1559 one deposit, 1562 two deposits (about 3 per extra deposit) |
-| Kaspa fee per mint | ~0.33 KAS, plus 1 KAS carried by each minted token output |
-| GPU per proof | $0.05 to $0.11 rented; a weekly heartbeat ~$0.25 |
-| throughput | up to 4 deposits per proof, one proof per Ethereum finality update |
-
-## Where the bridge actually is
-
-Most of this repository is plumbing: fetching data, building transactions, running a GPU, keeping
-logs. The bridge itself is three files, about 450 lines together. Read these first.
-
-**1. [`eth-prover/methods/guest/src/lib.rs`](eth-prover/methods/guest/src/lib.rs): the proven
-program (~190 lines).** It runs inside the zkVM; its hash is the image id the covenant trusts.
-`run()` reads top to bottom:
-- the two `assert!`s at the top: the prover may not supply its own validator committee
-- steps 1 and 2: verify the sync committee's BLS signatures on any committee rotations and on the
-  finality update (Helios does the cryptography)
-- step 3, `assert_ne!(new_header, prev_header, "no progress")`: this one line makes every proof
-  single-use
-- step 5 and `verify_vault_deposits()`: Merkle-Patricia proofs that the vault's storage holds each
-  deposit at the finalized state root
-- `env::commit_slice(&journal.encode())`: the only output
-
-**2. [`bridge/bridge.sil`](bridge/bridge.sil): the covenant on Kaspa (~200 lines).** The `advance`
-function is the bridge rule:
-- `r0.g16.verify(sha256(journal), proof, image_id)`: this journal came from that program
-- the four `require`s after it: Ethereum mainnet, continues from my header, signed by my committee,
-  about my vault
-- the `for` loop: one token output per deposit beyond the cursor, to exactly the address in the
-  journal
-- `if (mints == 0)`: a heartbeat leaves the token untouched
-- `keepValue()`: one spend can never drain the covenant
-- `return(State {...})`: the successor carries the new header, committee and cursor
-
-**3. [`vault/src/Vault.sol`](vault/src/Vault.sol): the deposit side (~70 lines).** One function,
-`deposit()`. No other function exists, which is the point.
-
-The glue between them: the journal layout in
-[`eth-prover/primitives/src/lib.rs`](eth-prover/primitives/src/lib.rs) (230 bytes plus 49 per
-deposit; the guest writes it, the covenant slices it), and the vault's storage layout (documented
-in `Vault.sol`, hardcoded in the guest, so the image id pins it).
-
-Everything else, by role:
-- `eth-prover/host/` (~750 lines): fetches beacon data and storage proofs, runs or proves the guest,
-  wraps the proof to Groth16. A CLI around file 1.
-- `bridge/src/` (~800 lines): compiles file 2, assembles complete Kaspa transactions and runs them
-  through the real rusty-kaspa 2.1.0 script engine before anything is sent; `bridge/tests/engine.rs`
-  is the table of everything the covenant rejects.
-- `bin/bridge.mjs` (~400 lines): talks to the Kaspa node, computes fees, keeps the state file.
-- `bin/bridge-prover.mjs` (~350 lines): the operator. Decides mint or heartbeat, chains the tools
-  above, rents or uses a GPU. Choose your GPU mode with `--gpu`; the branch is in `cycle()`, step 3.
-
-The service is operations, not the bridge: the first mint on mainnet was done by hand, command by
-command. If every prover stopped tomorrow, the covenant would sit unchanged until anyone ran one
-again.
+[`docs/SELF-RESCUE.md`](docs/SELF-RESCUE.md) walks through both, what they need, how long they take,
+and what the relay's revert reasons mean. The inbound rescue needs the instance's current state file
+and light-client store, which are public data and published alongside the instance (the doc says
+where).
 
 ## Repository
 
 | path | what |
 |---|---|
-| [`eth-prover/`](eth-prover) | the RISC Zero program (guest) and its host CLI: fetch, prove, wrap, decode; the Docker image |
-| [`bridge/`](bridge) | the Kaspa covenant (`bridge.sil`), the KCC-20 token (`kcc20.sil`), the Rust tool that builds every transaction and runs it through the 2.1.0 engine, the mainnet record |
-| [`vault/`](vault) | `Vault.sol` and the test token, Foundry project, storage layout |
-| [`bin/`](bin) | `bridge-prover.mjs` (the prover service), `bridge.mjs` (deploy, advance, transfer), helpers |
-| [`deployments/`](deployments) | the mainnet instances: covenant ids, parameters, every transaction |
-| `eth-prover/out-*/` | proof bundles of every mainnet advance, with the inputs to re-prove them |
-| `src/`, `test/`, `fixtures/`, `prover/`, `vendor/`, [`docs/`](docs) | the Kaspa ZK precompile tests this project grew out of (write-up in `docs/`), a toy RISC Zero program, the Kaspa WASM SDK 2.1.0 |
+| [`usdc/`](usdc) | `UsdcVaultV4.sol`, `KaspaRelayV5.sol`, `RelayFactoryV3.sol`, the settlement interface, Foundry tests (unit and mainnet fork), storage layouts, and `deployments/` with every instance's parameters and transactions |
+| [`eth-prover/`](eth-prover) | the inbound RISC Zero guest (Ethereum finality and vault storage) and its host CLI: fetch, execute, prove, wrap, journal; the Docker build that produces the pinned id |
+| [`outbound/kaspa-prover/`](outbound/kaspa-prover) | the outbound guest (Kaspa headers, PoW, GHOSTDAG, attestation ladder, KZO6 journal) and its host CLI; the Docker build |
+| [`outbound/burnwitness/`](outbound/burnwitness) | reads a burn and the headers after it from a Kaspa node into the witness the guest consumes; the adversarial suite |
+| [`outbound/kpow/`](outbound/kpow), [`outbound/dagwalk/`](outbound/dagwalk) | kHeavyHash and GHOSTDAG measurements and vectors that fixed the guest's design |
+| [`bridge-v7/`](bridge-v7) | the Kaspa covenant (Silverscript), the KCC-20 token and `BridgeMint` authority, the Rust tool that builds every Kaspa transaction and runs it through the 2.1.0 engine first; the engine tests |
+| [`bin/`](bin) | `bridge-v5.mjs` (the covenant driver: key, genesis, advance, burn, state), the two rescue scripts, `minter-artifact.py` |
+| [`vendor/kaspa/`](vendor/kaspa) | the rusty-kaspa WASM SDK 2.1.0, pinned |
+| [`docs/`](docs) | `V4-DESIGN.md` and its numbered increments (the design record with every measured number), the external reviews, the Gloas (Glamsterdam) work, the guide, the terms, the USDC blacklist study |
+| [`fixtures/`](fixtures) | `FETCH.sh` and the hashes of the large test fixtures, which are release assets rather than tracked files |
 
-## Roadmap
+Not in this repository: Kaspero's operating stack (the prover and relay robots, the watchdog, the web
+page, GPU rental, deployment scripts). None of it is needed to verify the bridge or to rescue funds, and
+[`PROVENANCE.md`](PROVENANCE.md) names the private commit this export was cut from. Earlier
+generations of the covenant (`bridge` through `bridge-v6`) and the one-way KBT instance of October 2026
+are retired and not included; `docs/V4-DESIGN.md` records what each changed.
 
-1. **USDC instance**: a new capped vault and a new covenant whose token has a burn entry from day
-   one, so that burns are recorded on Kaspa in a form a future Ethereum-side proof can read.
-2. **Redemption**: a proof of Kaspa consensus verifiable on Ethereum. Research first: what must be
-   proven, at what cost, at what depth.
-3. **Gloas support** before Ethereum's Glamsterdam fork reaches mainnet.
+## Status and record
+
+- 2026-10-12: one-way bridge (Ethereum to Kaspa, test token) live on mainnet.
+- 2026-11-02 to 11-14: outbound proof designed, measured and reviewed (`docs/REVIEW-*.md`, `docs/V4-DESIGN-2.*.md`).
+- 2026-11-15: instance 1 with real USDC: deposit in 24.5 min, first exit in 71.6 min; a second exit took
+  3 h 38 when the GPU provider's API quota ran out (the operating stack now has two providers).
+- 2026-11-16: instance 2 (`kzUSDC`, FLOOR 600) deployed after an external review of the attestation
+  floor; instance 1 drained and closed (`closeDeposits` tx
+  [`0xe821f5c5…`](https://etherscan.io/tx/0xe821f5c59c42a09a7590a883408cb290416413e086ffc844e115dd6a466aad4b)).
+
+Measured numbers live in `docs/V4-DESIGN.md` and are not re-derived here.
 
 ## License
 
-MIT, see [`LICENSE`](LICENSE). `eth-prover/` derives from RISC Zero's r0vm-helios and Succinct's
-sp1-helios, both MIT; their notices are kept in [`eth-prover/LICENSE`](eth-prover/LICENSE).
+[Business Source License 1.1](LICENSE). You may read, build, test, reproduce the ids, prove and settle
+against Kaspero's instances (including rescuing your own funds) and deploy to test networks. Deploying
+this code, or a derivative, as a bridge on Kaspa or Ethereum mainnet requires a commercial license from
+Kaspero Labs until the Change Date (2030-11-16), after which it becomes MIT. The one-way bridge of
+October 2026 (this repository's history through `1f18c7e`) was MIT and stays MIT. `eth-prover/` keeps the MIT
+notices of r0vm-helios and sp1-helios; `vendor/kaspa` is rusty-kaspa's ISC-licensed SDK.
 
 ## Credits
 
-Built by [Kaspero Labs](https://github.com/kasperolabs) with Claude. Standing on:
-[RISC Zero](https://github.com/risc0/risc0) and [r0vm-helios](https://github.com/risc0/r0vm-helios)
-(audited by zkSecurity), [Helios](https://github.com/a16z/helios) by a16z,
-[rusty-kaspa](https://github.com/kaspanet/rusty-kaspa) and its ZK precompile (Toccata),
-[Silverscript](https://github.com/kaspanet/silverscript).
+Built by [Kaspero Labs](https://kasperolabs.com) with Claude. Standing on
+[RISC Zero](https://github.com/risc0/risc0) and [r0vm-helios](https://github.com/risc0/r0vm-helios),
+[Helios](https://github.com/a16z/helios) by a16z, [rusty-kaspa](https://github.com/kaspanet/rusty-kaspa)
+and its ZK precompile, and [Silverscript](https://github.com/kaspanet/silverscript). The external
+reviews of the design are in `docs/REVIEW-*.md`. Exported from private commit
+`e1edd263b0496e6f0f564af344a4dd85bbddb6fc` on 2026-11-16.

@@ -1,0 +1,6 @@
+vectors/target/
+sol/out/
+sol/cache/
+sol/lib/
+sol/vectors.json
+gen/__pycache__/

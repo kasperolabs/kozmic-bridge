@@ -1,0 +1,24 @@
+[workspace]
+resolver = "2"
+members = ["host", "methods", "primitives"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+# Pinned to the exact risc0 version the Kaspa SDK v2.1.0 embeds (same pins as eth-prover/).
+[workspace.dependencies]
+risc0-zkvm = { version = "=3.0.4" }
+risc0-build = { version = "3.0" }
+kaspa-prover-primitives = { path = "primitives" }
+kaspa-prover-methods = { path = "methods" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+
+[profile.release]
+debug = 1
+lto = true
