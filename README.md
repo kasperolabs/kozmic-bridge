@@ -191,4 +191,4 @@ Built by [Kaspero Labs](https://kasperolabs.com) with Claude. Standing on
 [Helios](https://github.com/a16z/helios) by a16z, [rusty-kaspa](https://github.com/kaspanet/rusty-kaspa)
 and its ZK precompile, and [Silverscript](https://github.com/kaspanet/silverscript). The external
 reviews of the design are in `docs/REVIEW-*.md`. Exported from private commit
-`9c01cd9280dcb670f9ff4a215847a5f5a86b803b` on 2026-11-16.
+`ce2ed3c39854d655e4cc2d09ca819c1a21b1132c` on 2026-11-16.
