@@ -26,8 +26,8 @@ USDC from 2026-11-15 as the final rehearsal, settled every transfer, and was clo
 | vault (Ethereum) | [`0x1B9f6750d8b9776Ed9128DC48A7537019ecB2243`](https://etherscan.io/address/0x1B9f6750d8b9776Ed9128DC48A7537019ecB2243) (`UsdcVaultV4.sol`) |
 | relay (Ethereum) | [`0xF626DcC984d12445ABdDAADA989855E66d3cDB3A`](https://etherscan.io/address/0xF626DcC984d12445ABdDAADA989855E66d3cDB3A) (`KaspaRelayV5.sol`) |
 | factory (Ethereum) | `0x3749f442F27d195f34219E668058E151C29c16E2` (`RelayFactoryV3.sol`), creation tx [`0xe767fe1a…`](https://etherscan.io/tx/0xe767fe1ad0486d1b7f59f03dda0c1eb2b7f28a27074bd7189597260490a4d222), block 26,427,414 |
-| inbound guest (Ethereum finality, verified on Kaspa) | image id `see usdc/deployments` |
-| outbound guest (Kaspa PoW and DAG, verified on Ethereum) | image id `see usdc/deployments` |
+| inbound guest (Ethereum finality, verified on Kaspa) | image id `45400f5f582380ce9919fbc5bf94f83d19e2b9aa9f5b2043030cb69b37587fd6` |
+| outbound guest (Kaspa PoW and DAG, verified on Ethereum) | image id `1b86827695b06ef38f4e31a36b995b52011fad678e9fc856e637163dc804dbb1` |
 | every parameter and transaction | [`usdc/deployments/2-0xF626DcC984d12445ABdDAADA989855E66d3cDB3A.json`](usdc/deployments) |
 
 The parameters you will feel: deposits take about 25 minutes (Ethereum finality plus one proof); an exit
@@ -191,4 +191,4 @@ Built by [Kaspero Labs](https://kasperolabs.com) with Claude. Standing on
 [Helios](https://github.com/a16z/helios) by a16z, [rusty-kaspa](https://github.com/kaspanet/rusty-kaspa)
 and its ZK precompile, and [Silverscript](https://github.com/kaspanet/silverscript). The external
 reviews of the design are in `docs/REVIEW-*.md`. Exported from private commit
-`2f321b7d0def426108e1d253f83b64dcd2145a33` on 2026-11-16.
+`9c01cd9280dcb670f9ff4a215847a5f5a86b803b` on 2026-11-16.

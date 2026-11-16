@@ -39,6 +39,7 @@ def walk(o,p=''):
     if isinstance(o,dict):
         for k,v in o.items(): walk(v,p+'/'+k)
     elif isinstance(o,str) and re.fullmatch(r'(0x)?[0-9a-fA-F]{64}',o) and re.search(r'image',p,re.I) and re.search(r'inbound|eth|deposit',p,re.I): hits.append(o.lower().removeprefix('0x'))
+walk(d)
 print(hits[0] if hits else '')
 PY
 )}
