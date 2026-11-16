@@ -28,6 +28,7 @@ USDC from 2026-11-15 as the final rehearsal, settled every transfer, and was clo
 | factory (Ethereum) | `0x3749f442F27d195f34219E668058E151C29c16E2` (`RelayFactoryV3.sol`), creation tx [`0xe767fe1a…`](https://etherscan.io/tx/0xe767fe1ad0486d1b7f59f03dda0c1eb2b7f28a27074bd7189597260490a4d222), block 26,427,414 |
 | inbound guest (Ethereum finality, verified on Kaspa) | image id `45400f5f582380ce9919fbc5bf94f83d19e2b9aa9f5b2043030cb69b37587fd6` |
 | outbound guest (Kaspa PoW and DAG, verified on Ethereum) | image id `1b86827695b06ef38f4e31a36b995b52011fad678e9fc856e637163dc804dbb1` |
+| GPU images the proofs run in, by digest | `kasperolabs/eth-prover@sha256:42e598d102cddf9fb1603d46475940a33cfe3d76c183e77fc4ee0bf4c1fc8882`, `kasperolabs/kaspa-prover@sha256:d034995ff605ecceb535eb86b43a1101f298c54eb92a7ff77b8983ba4e159f92` (each prints the image id above; a tag can move, a digest cannot) |
 | every parameter and transaction | [`usdc/deployments/2-0xF626DcC984d12445ABdDAADA989855E66d3cDB3A.json`](usdc/deployments) |
 
 The parameters you will feel: deposits take about 25 minutes (Ethereum finality plus one proof); an exit
@@ -191,4 +192,4 @@ Built by [Kaspero Labs](https://kasperolabs.com) with Claude. Standing on
 [Helios](https://github.com/a16z/helios) by a16z, [rusty-kaspa](https://github.com/kaspanet/rusty-kaspa)
 and its ZK precompile, and [Silverscript](https://github.com/kaspanet/silverscript). The external
 reviews of the design are in `docs/REVIEW-*.md`. Exported from private commit
-`ce2ed3c39854d655e4cc2d09ca819c1a21b1132c` on 2026-11-16.
+`3ada31fc4c9b5768d4cf6fe9a582a02862fda8fb` on 2026-11-16.

@@ -92,8 +92,7 @@ ETH_RPC_FILE=eth-rpc-url.txt BEACON=https://ethereum-beacon-api.publicnode.com \
 VAULT=0x1B9f6750d8b9776Ed9128DC48A7537019ecB2243 TOKEN=0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 \
 STATE=bridge-kzusdc-state.json STORE=eth-prover/stores/mainnet-kzusdc \
 KASPA_URL=ws://127.0.0.1:17110 NONCES="14 15" \
-ETH_PROVER_IMAGE=<the digest-pinned kasperolabs/eth-prover image named in README.md> \
-bash bin/prove-deposit.sh
+bash bin/prove-deposit.sh        # ETH_PROVER_IMAGE defaults to the digest README.md names
 ```
 
 What it does: reads the covenant's header from the state file and the pinned image id from the

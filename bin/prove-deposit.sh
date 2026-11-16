@@ -6,7 +6,7 @@
 #
 #   ETH_RPC_FILE=eth-rpc-url.txt BEACON=https://<beacon node with light-client endpoints> \
 #   VAULT=0x... TOKEN=0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 STATE=bridge-state.json STORE=eth-prover/stores/mainnet \
-#   KASPA_URL=ws://127.0.0.1:17110 NONCES="12 13" ETH_PROVER_IMAGE=<kasperolabs/eth-prover@sha256:... from README.md> \
+#   KASPA_URL=ws://127.0.0.1:17110 NONCES="12 13" [ETH_PROVER_IMAGE=<digest; defaults to the one README.md names>] \
 #   bash bin/prove-deposit.sh [OUT_DIR]
 #
 # STATE is the instance's current state file and STORE its light-client store directory (one file per finalized
@@ -20,7 +20,8 @@
 # end by someone outside Kaspero.
 set -u
 cd "$(dirname "$0")/.." || exit 1
-: "${ETH_RPC_FILE:?}" "${BEACON:?}" "${VAULT:?}" "${TOKEN:?}" "${STATE:?}" "${STORE:?}" "${KASPA_URL:?}" "${NONCES:?}" "${ETH_PROVER_IMAGE:?set ETH_PROVER_IMAGE to the digest-pinned image named in README.md}"
+: "${ETH_RPC_FILE:?}" "${BEACON:?}" "${VAULT:?}" "${TOKEN:?}" "${STATE:?}" "${STORE:?}" "${KASPA_URL:?}" "${NONCES:?}"
+ETH_PROVER_IMAGE=${ETH_PROVER_IMAGE:-kasperolabs/eth-prover@sha256:42e598d102cddf9fb1603d46475940a33cfe3d76c183e77fc4ee0bf4c1fc8882}   # the digest README.md names
 OUT=${1:-eth-prover/out-rescue-$(date -u +%Y%m%dT%H%M%SZ)}; mkdir -p "$OUT"
 EP=${ETH_PROVER_BIN:-eth-prover/target/release/eth-prover}
 export BRIDGE_COVENANT_V5_BIN=${BRIDGE_COVENANT_V5_BIN:-bridge-v7/target/release/bridge-covenant}
